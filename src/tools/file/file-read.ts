@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
-import { validatePath, isPathAllowed, parseAllowedPaths } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import { sanitizeOutput } from '../../security/sanitizer.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
@@ -33,8 +33,7 @@ export class FileReadTool implements ITool {
     try {
       const { path: filePath, offset, limit } = inputSchema.parse(input);
       const resolved = validatePath(filePath, context.projectPath);
-      const allowedPaths = parseAllowedPaths(process.env.ALLOWED_PATHS);
-      if (allowedPaths.length > 0 && !isPathAllowed(resolved, allowedPaths)) {
+      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(resolved, context.allowedPaths ?? [])) {
         return { content: `Path is outside allowed paths`, isError: true };
       }
       const content = await fs.readFile(resolved, 'utf-8');

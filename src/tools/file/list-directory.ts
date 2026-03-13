@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
-import { validatePath, isPathAllowed, parseAllowedPaths } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
 const inputSchema = z.object({
@@ -27,8 +27,7 @@ export class ListDirectoryTool implements ITool {
     try {
       const { path: dirPath } = inputSchema.parse(input);
       const resolved = validatePath(dirPath, context.projectPath);
-      const allowedPaths = parseAllowedPaths(process.env.ALLOWED_PATHS);
-      if (allowedPaths.length > 0 && !isPathAllowed(resolved, allowedPaths)) {
+      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(resolved, context.allowedPaths ?? [])) {
         return { content: `Path is outside allowed paths`, isError: true };
       }
       const entries = await fs.readdir(resolved, { withFileTypes: true });

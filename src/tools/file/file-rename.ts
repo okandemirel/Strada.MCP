@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
-import { validatePath, isPathAllowed, parseAllowedPaths } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
 const inputSchema = z.object({
@@ -34,8 +34,7 @@ export class FileRenameTool implements ITool {
       const { source, destination } = inputSchema.parse(input);
       const resolvedSrc = validatePath(source, context.projectPath);
       const resolvedDst = validatePath(destination, context.projectPath);
-      const allowedPaths = parseAllowedPaths(process.env.ALLOWED_PATHS);
-      if (allowedPaths.length > 0 && (!isPathAllowed(resolvedSrc, allowedPaths) || !isPathAllowed(resolvedDst, allowedPaths))) {
+      if ((context.allowedPaths ?? []).length > 0 && (!isPathAllowed(resolvedSrc, context.allowedPaths ?? []) || !isPathAllowed(resolvedDst, context.allowedPaths ?? []))) {
         return { content: `Path is outside allowed paths`, isError: true };
       }
       await fs.rename(resolvedSrc, resolvedDst);

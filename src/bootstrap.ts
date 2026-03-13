@@ -8,6 +8,7 @@ import type { ITool, ToolContext } from './tools/tool.interface.js';
 import type { IResource } from './resources/resource.interface.js';
 import type { IPrompt } from './prompts/prompt.interface.js';
 import type { StradaMcpConfig } from './config/config.js';
+import { parseAllowedPaths } from './security/path-guard.js';
 
 // --- Tool imports (barrel exports) ---
 import {
@@ -111,6 +112,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     workingDirectory: projectPath,
     readOnly: config.readOnly,
     unityBridgeConnected: false,
+    allowedPaths: parseAllowedPaths(config.allowedPaths),
   };
 
   // -------------------------------------------------------------------------
@@ -329,42 +331,25 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
   for (const prompt of prompts) {
     promptRegistry.register(prompt);
 
-    if (prompt.arguments.length > 0) {
-      // Build a zod shape for the MCP SDK prompt argument validation
-      const shape: Record<string, z.ZodString | z.ZodOptional<z.ZodString>> = {};
-      for (const arg of prompt.arguments) {
-        shape[arg.name] = arg.required ? z.string() : z.string().optional();
-      }
-
-      server.prompt(
-        prompt.name,
-        prompt.description,
-        shape,
-        async (args) => {
-          const messages = await prompt.render(args as Record<string, string>);
-          return {
-            messages: messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-          };
-        },
-      );
-    } else {
-      server.prompt(
-        prompt.name,
-        prompt.description,
-        async () => {
-          const messages = await prompt.render({});
-          return {
-            messages: messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-          };
-        },
-      );
+    const shape: Record<string, z.ZodString | z.ZodOptional<z.ZodString>> = {};
+    for (const arg of prompt.arguments) {
+      shape[arg.name] = arg.required ? z.string() : z.string().optional();
     }
+
+    server.prompt(
+      prompt.name,
+      prompt.description,
+      shape,
+      async (args) => {
+        const messages = await prompt.render((args ?? {}) as Record<string, string>);
+        return {
+          messages: messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        };
+      },
+    );
   }
 
   return {

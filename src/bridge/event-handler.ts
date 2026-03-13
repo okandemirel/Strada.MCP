@@ -100,8 +100,7 @@ export class EventHandler extends EventEmitter {
       ? notification.params.timestamp
       : Date.now();
 
-    const data = { ...notification.params } as Record<string, unknown>;
-    delete data.timestamp;
+    const { timestamp: _ts, ...data } = notification.params as Record<string, unknown>;
 
     this.bufferAndEmit({ type: eventType, timestamp, data });
   }

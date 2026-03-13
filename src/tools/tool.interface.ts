@@ -3,6 +3,7 @@ export interface ToolContext {
   workingDirectory: string;
   readOnly: boolean;
   unityBridgeConnected: boolean;
+  allowedPaths?: string[];
 }
 
 export interface ToolResult {

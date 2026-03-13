@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createMcpServer } from './server.js';
 import { bootstrap } from './bootstrap.js';
 import { BridgeManager } from './bridge/bridge-manager.js';
+import { ConnectionState } from './bridge/connection-manager.js';
 import { loadConfig } from './config/config.js';
 import { createLogger } from './utils/logger.js';
 
@@ -26,19 +27,25 @@ async function main(): Promise<void> {
   let bridgeManager: BridgeManager | null = null;
   if (config.unityBridgeAutoConnect) {
     bridgeManager = BridgeManager.fromConfig(config);
-    bridgeManager.on('stateChange', (state: string) => {
+    bridgeManager.on('stateChange', (state: ConnectionState) => {
       logger.info(`Unity bridge: ${state}`);
-      // Update the shared toolContext when bridge connects/disconnects
-      result.toolContext.unityBridgeConnected = state === 'connected';
+      const connected = state === ConnectionState.Connected;
+      result.toolContext.unityBridgeConnected = connected;
 
-      // Inject bridge client into bridge-aware tools and resources
-      if (state === 'connected' && bridgeManager) {
+      if (connected && bridgeManager) {
         const client = bridgeManager.client;
         for (const tool of result.bridgeAwareTools) {
           tool.setBridgeClient(client);
         }
         for (const resource of result.bridgeAwareResources) {
           resource.setBridgeClient(client);
+        }
+      } else {
+        for (const tool of result.bridgeAwareTools) {
+          tool.setBridgeClient(null);
+        }
+        for (const resource of result.bridgeAwareResources) {
+          resource.setBridgeClient(null);
         }
       }
     });
@@ -62,13 +69,14 @@ async function main(): Promise<void> {
   }
 
   // Graceful shutdown
-  const shutdown = () => {
+  const shutdown = async () => {
     logger.info('Shutting down...');
     bridgeManager?.destroy();
+    try { await server.close(); } catch { /* ignore */ }
     process.exit(0);
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
 }
 
 main().catch((err) => {

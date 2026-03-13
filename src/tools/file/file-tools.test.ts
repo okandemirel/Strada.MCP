@@ -21,6 +21,7 @@ describe('File Tools', () => {
       workingDirectory: tmpDir,
       readOnly: false,
       unityBridgeConnected: false,
+      allowedPaths: [],
     };
   });
 
