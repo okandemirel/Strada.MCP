@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import { zodToJsonSchema } from '../../utils/zod-to-json-schema.js';
 import type { BridgeClient } from '../../bridge/bridge-client.js';
-import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
+import type { ITool, ToolContext, ToolResult, ToolMetadata, ToolCategory } from '../tool.interface.js';
 
 /**
  * Abstract base class for all Unity bridge-dependent tools.
@@ -25,6 +25,9 @@ export abstract class BridgeTool implements ITool {
   /** Whether this tool is dangerous (e.g., delete operations). */
   protected abstract readonly dangerousTool: boolean;
 
+  /** Override to change the tool category from the default 'unity-runtime'. */
+  protected readonly toolCategory: ToolCategory = 'unity-runtime';
+
   private bridgeClient: BridgeClient | null = null;
   private _inputSchema: Record<string, unknown> | null = null;
 
@@ -37,7 +40,7 @@ export abstract class BridgeTool implements ITool {
 
   get metadata(): ToolMetadata {
     return {
-      category: 'unity-runtime',
+      category: this.toolCategory,
       requiresBridge: true,
       dangerous: this.dangerousTool,
       readOnly: this.readOnlyTool,
