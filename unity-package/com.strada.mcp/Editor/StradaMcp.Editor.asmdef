@@ -1,0 +1,18 @@
+{
+  "name": "StradaMcp.Editor",
+  "rootNamespace": "Strada.Mcp.Editor",
+  "references": [
+    "StradaMcp.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

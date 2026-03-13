@@ -1,0 +1,19 @@
+{
+  "name": "com.strada.mcp",
+  "version": "1.0.0",
+  "displayName": "Strada MCP Bridge",
+  "description": "Bridge between Strada.MCP server and Unity Editor",
+  "unity": "2021.3",
+  "author": {
+    "name": "Nico Okanu"
+  },
+  "type": "tool",
+  "keywords": [
+    "strada",
+    "mcp",
+    "bridge",
+    "ai",
+    "editor"
+  ],
+  "license": "MIT"
+}
