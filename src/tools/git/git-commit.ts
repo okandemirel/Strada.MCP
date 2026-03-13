@@ -55,7 +55,7 @@ export class GitCommitTool implements ITool {
       // Build commit command
       const commitArgs = ['commit'];
       if (all) commitArgs.push('-a');
-      commitArgs.push('-m', message);
+      commitArgs.push('-m', sanitizeArg(message));
 
       const result = await runProcess('git', commitArgs, {
         timeout: 15000,

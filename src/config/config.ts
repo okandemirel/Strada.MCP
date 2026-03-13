@@ -34,6 +34,7 @@ const configSchema = z.object({
   allowedPaths: z.string().optional(),
   readOnly: boolFromEnv.default(false),
   scriptExecuteEnabled: boolFromEnv.default(false),
+  reflectionInvokeEnabled: boolFromEnv.default(false),
   maxFileSize: z.coerce.number().int().min(1024).max(104857600).default(10485760),
 
   // Logging
@@ -63,6 +64,7 @@ export function loadConfig(): StradaMcpConfig {
     allowedPaths: process.env.ALLOWED_PATHS,
     readOnly: process.env.READ_ONLY,
     scriptExecuteEnabled: process.env.SCRIPT_EXECUTE_ENABLED,
+    reflectionInvokeEnabled: process.env.REFLECTION_INVOKE_ENABLED,
     maxFileSize: process.env.MAX_FILE_SIZE,
     logLevel: process.env.LOG_LEVEL,
     logFile: process.env.LOG_FILE,
