@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Strada.MCP</h1>
   <p><strong>The most comprehensive framework-aware Unity MCP server</strong></p>
-  <p>49 tools, 10 resources, 6 prompts — with Strada.Core intelligence, RAG-powered search, and Unity Editor bridge</p>
+  <p>76 tools, 10 resources, 6 prompts — with Strada.Core intelligence, RAG-powered search, and Unity Editor bridge</p>
 
   <p>
     <a href="https://github.com/okandemirel/Strada.MCP/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
@@ -35,7 +35,7 @@ Strada.MCP is a Model Context Protocol (MCP) server purpose-built for Unity and 
 
 **Why Strada.MCP?**
 - **Framework-aware**: The only Unity MCP server that understands Strada.Core patterns (ECS, MVCS, DI, modules)
-- **Complete toolset**: 49 tools covering files, git, .NET, code analysis, Strada scaffolding, and Unity runtime operations
+- **Complete toolset**: 76 tools covering files, git, .NET, code analysis, Strada scaffolding, Unity runtime, scene/prefab, assets, subsystems, and project config
 - **RAG-powered search**: Tree-sitter C# parsing + Gemini embeddings + HNSW vector search
 - **Real-time bridge**: TCP bridge to Unity Editor for live scene manipulation, component editing, and play mode control
 - **Security-first**: Path traversal prevention, credential scrubbing, read-only mode, script execution opt-in
@@ -107,20 +107,25 @@ Ask your AI assistant to work with your Unity project:
 
 ## Features
 
-### Tool Categories (49 total)
+### Tool Categories (76 total)
 
 | Category | Count | Requires Unity Bridge |
 |----------|-------|-----------------------|
 | Strada Framework | 10 | No |
 | Unity Runtime | 18 | Yes |
+| Unity Scene/Prefab | 8 | Mixed |
+| Unity Asset | 8 | Mixed |
+| Unity Subsystem | 6 | Yes |
+| Unity Config | 4 | Yes |
+| Advanced | 5 | Mixed |
 | File Operations | 6 | No |
 | Search | 3 | No |
 | Git | 6 | No |
 | .NET Build | 2 | No |
 | Analysis | 4 | No |
 
-- **Unity closed**: 31 tools available (file, git, search, analysis, Strada scaffolding, .NET)
-- **Unity open**: All 49 tools active via bridge
+- **Unity closed**: 35+ tools available (file, git, search, analysis, Strada scaffolding, .NET, scene/prefab analyze)
+- **Unity open**: All 76 tools active via bridge
 
 ### Strada Framework Tools
 
@@ -202,6 +207,62 @@ These tools are unique to Strada.MCP — no competitor has framework-aware scaff
 | `csharp_parse` | Parse C# source code into a structured AST with classes, structs, methods, fields, namespaces |
 | `dependency_graph` | Analyze Unity project assembly references and namespace dependencies, detect circular dependencies |
 | `project_health` | Comprehensive project health check combining code quality, dependency analysis, and file statistics |
+
+### Unity Scene & Prefab Tools (8)
+
+| Tool | Description |
+|------|-------------|
+| `unity_scene_create` | Create a new Unity scene |
+| `unity_scene_open` | Open an existing scene in the editor |
+| `unity_scene_save` | Save the current scene |
+| `unity_scene_info` | Get scene metadata and statistics |
+| `unity_scene_analyze` | Analyze scene hierarchy from YAML (no bridge required) |
+| `unity_prefab_create` | Create a new prefab from a GameObject |
+| `unity_prefab_instantiate` | Instantiate a prefab in the current scene |
+| `unity_prefab_analyze` | Analyze prefab structure from YAML (no bridge required) |
+
+### Unity Asset Tools (8)
+
+| Tool | Description |
+|------|-------------|
+| `unity_asset_find` | Search for assets by name, type, or label |
+| `unity_asset_dependencies` | Analyze asset dependency chains |
+| `unity_asset_unused` | Find potentially unused assets in the project |
+| `unity_material_get` | Read material properties and shader assignments |
+| `unity_material_set` | Modify material properties |
+| `unity_shader_list` | List available shaders with keywords and properties |
+| `unity_scriptableobject_create` | Create a new ScriptableObject asset |
+| `unity_texture_info` | Get texture import settings and metadata |
+
+### Unity Subsystem Tools (6)
+
+| Tool | Description |
+|------|-------------|
+| `unity_animation_play` | Control animator playback |
+| `unity_animation_list` | List animation clips and parameters |
+| `unity_physics_raycast` | Perform physics raycasts in the scene |
+| `unity_navmesh_bake` | Bake or configure NavMesh settings |
+| `unity_particles_control` | Control particle system playback |
+| `unity_lighting_bake` | Bake lighting and configure light settings |
+
+### Unity Config Tools (4)
+
+| Tool | Description |
+|------|-------------|
+| `unity_player_settings` | Get/set player settings (company, product, platform) |
+| `unity_quality_settings` | Get/set quality levels and graphics settings |
+| `unity_build_settings` | Get/set build targets, scenes, and options |
+| `unity_project_settings` | Get/set tags, layers, physics, and input settings |
+
+### Advanced Tools (5)
+
+| Tool | Description |
+|------|-------------|
+| `batch_execute` | Execute multiple tools in a single request |
+| `script_execute` | Execute C# scripts via Roslyn (opt-in, disabled by default) |
+| `script_validate` | Validate C# script syntax without execution |
+| `csharp_reflection` | Inspect types, methods, and assemblies via reflection |
+| `unity_profiler` | Access Unity profiler data and performance metrics |
 
 ### RAG-Powered Code Search
 
@@ -338,6 +399,23 @@ File: `~/.windsurf/mcp.json`:
 }
 ```
 
+#### Claude Code
+
+File: `~/.claude/settings.json` or project `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "strada-mcp": {
+      "command": "strada-mcp",
+      "env": {
+        "UNITY_PROJECT_PATH": "/path/to/project"
+      }
+    }
+  }
+}
+```
+
 #### VS Code + Continue
 
 File: `.continue/config.json`:
@@ -407,6 +485,7 @@ All options are configured via environment variables:
 | `ALLOWED_PATHS` | Comma-separated list of allowed root directories | — |
 | `READ_ONLY` | Global read-only mode | `false` |
 | `SCRIPT_EXECUTE_ENABLED` | Enable Roslyn script execution | `false` |
+| `REFLECTION_INVOKE_ENABLED` | Enable C# reflection method invocation | `false` |
 | `MAX_FILE_SIZE` | Maximum file size (bytes) | `10485760` |
 | `LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` | `info` |
 | `LOG_FILE` | Log file path (stderr if empty) | — |
