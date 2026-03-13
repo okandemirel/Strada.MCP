@@ -48,7 +48,7 @@ export abstract class BridgeTool implements ITool {
   }
 
   /** Inject the bridge client instance. */
-  setBridgeClient(client: BridgeClient): void {
+  setBridgeClient(client: BridgeClient | null): void {
     this.bridgeClient = client;
   }
 
@@ -64,8 +64,8 @@ export abstract class BridgeTool implements ITool {
         };
       }
 
-      // Check read-only mode for write tools
-      if (!this.readOnlyTool && context.readOnly) {
+      // Check read-only mode for write tools (allow read actions through)
+      if (!this.readOnlyTool && !this.isReadAction(input) && context.readOnly) {
         return {
           content: `Error: Cannot execute ${this.name} in read-only mode.`,
           isError: true,

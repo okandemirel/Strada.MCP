@@ -78,7 +78,7 @@ export class ScriptValidateTool implements ITool {
   private structParser: CSharpParser | null = null;
 
   /** Inject the bridge client instance for strict mode. */
-  setBridgeClient(client: BridgeClient): void {
+  setBridgeClient(client: BridgeClient | null): void {
     this.bridgeClient = client;
   }
 

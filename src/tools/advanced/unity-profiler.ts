@@ -39,7 +39,7 @@ export class UnityProfilerTool implements ITool {
   private bridgeClient: BridgeClient | null = null;
 
   /** Inject the bridge client instance. */
-  setBridgeClient(client: BridgeClient): void {
+  setBridgeClient(client: BridgeClient | null): void {
     this.bridgeClient = client;
   }
 

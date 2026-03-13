@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { validatePath } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import { validateCSharpIdentifier } from '../../security/validator.js';
 import { STRADA_API } from '../../context/strada-api-reference.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
@@ -121,6 +121,9 @@ export class ModuleCreateTool implements ITool {
       }
 
       const baseDir = validatePath(parsed.path, context.projectPath);
+      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(baseDir, context.allowedPaths ?? [])) {
+        return { content: `Path is outside allowed paths`, isError: true };
+      }
       const moduleDir = path.join(baseDir, parsed.moduleName);
       const scriptsDir = path.join(moduleDir, 'Scripts');
       const filesAffected: string[] = [];

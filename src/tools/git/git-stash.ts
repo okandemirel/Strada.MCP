@@ -46,8 +46,7 @@ export class GitStashTool implements ITool {
         case 'push':
           args = ['stash', 'push'];
           if (message) {
-            sanitizeArg(message);
-            args.push('-m', message);
+            args.push('-m', sanitizeArg(message));
           }
           break;
 

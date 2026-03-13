@@ -42,7 +42,7 @@ export class ScriptExecuteTool implements ITool {
   constructor(private readonly config: ScriptExecuteConfig) {}
 
   /** Inject the bridge client instance. */
-  setBridgeClient(client: BridgeClient): void {
+  setBridgeClient(client: BridgeClient | null): void {
     this.bridgeClient = client;
   }
 

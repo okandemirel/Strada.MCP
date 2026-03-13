@@ -1,6 +1,6 @@
 import { glob } from 'glob';
 import { z } from 'zod';
-import { validatePath } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
 const inputSchema = z.object({
@@ -33,6 +33,9 @@ export class GlobSearchTool implements ITool {
       const searchDir = basePath
         ? validatePath(basePath, context.projectPath)
         : context.projectPath;
+      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(searchDir, context.allowedPaths ?? [])) {
+        return { content: `Path is outside allowed paths`, isError: true };
+      }
 
       const matches = await glob(pattern, {
         cwd: searchDir,

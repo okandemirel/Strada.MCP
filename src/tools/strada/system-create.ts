@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { validatePath } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import { validateCSharpIdentifier } from '../../security/validator.js';
 import { STRADA_API } from '../../context/strada-api-reference.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
@@ -132,6 +132,9 @@ export class SystemCreateTool implements ITool {
       }
 
       const outputDir = validatePath(parsed.path, context.projectPath);
+      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(outputDir, context.allowedPaths ?? [])) {
+        return { content: `Path is outside allowed paths`, isError: true };
+      }
       const filePath = path.join(outputDir, `${parsed.name}.cs`);
       const content = generateSystem(parsed);
 

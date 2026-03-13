@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { glob } from 'glob';
 import { z } from 'zod';
-import { validatePath } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import { sanitizeOutput } from '../../security/sanitizer.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
@@ -65,6 +65,9 @@ export class GrepSearchTool implements ITool {
       const searchDir = searchPath
         ? validatePath(searchPath, context.projectPath)
         : context.projectPath;
+      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(searchDir, context.allowedPaths ?? [])) {
+        return { content: `Path is outside allowed paths`, isError: true };
+      }
 
       const filePattern = include ?? '**/*';
       const files = await glob(filePattern, {
