@@ -8,9 +8,10 @@ describe('MCP Server', () => {
     expect(instance.server).toBeDefined();
   });
 
-  it('should have tool registry', () => {
+  it('should have all three registries', () => {
     const instance = createMcpServer();
     expect(instance.toolRegistry).toBeDefined();
-    expect(instance.toolRegistry.getAll()).toHaveLength(0);
+    expect(instance.resourceRegistry).toBeDefined();
+    expect(instance.promptRegistry).toBeDefined();
   });
 });

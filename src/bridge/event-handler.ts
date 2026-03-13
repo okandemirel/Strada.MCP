@@ -19,6 +19,15 @@ const ALL_EVENT_TYPES: UnityEventType[] = [
 ];
 
 export class EventHandler extends EventEmitter {
+  private static readonly METHOD_TO_EVENT: Record<string, UnityEventType> = {
+    'unity.sceneChanged': 'SceneChanged',
+    'unity.consoleMessage': 'ConsoleLine',
+    'unity.compileStarted': 'CompileStarted',
+    'unity.compileFinished': 'CompileFinished',
+    'unity.playModeChanged': 'PlayModeChanged',
+    'unity.selectionChanged': 'SelectionChanged',
+  };
+
   private readonly recentEvents = new Map<UnityEventType, UnityEvent[]>();
 
   constructor(private readonly client: BridgeClient) {
@@ -74,27 +83,38 @@ export class EventHandler extends EventEmitter {
   }
 
   private handleNotification(notification: JsonRpcNotificationType): void {
-    // Only handle Unity event notifications
     if (!notification.params) return;
 
-    const result = UnityEventSchema.safeParse(notification.params);
-    if (!result.success) return;
+    // Try direct parsing first (params already has type field)
+    const directResult = UnityEventSchema.safeParse(notification.params);
+    if (directResult.success) {
+      this.bufferAndEmit(directResult.data as UnityEvent);
+      return;
+    }
 
-    const event = result.data as UnityEvent;
+    // Extract type from notification.method (C# EventBroadcaster format)
+    const eventType = EventHandler.METHOD_TO_EVENT[notification.method];
+    if (!eventType) return;
 
-    // Buffer the event
+    const timestamp = typeof notification.params.timestamp === 'number'
+      ? notification.params.timestamp
+      : Date.now();
+
+    const data = { ...notification.params } as Record<string, unknown>;
+    delete data.timestamp;
+
+    this.bufferAndEmit({ type: eventType, timestamp, data });
+  }
+
+  private bufferAndEmit(event: UnityEvent): void {
     const buffer = this.recentEvents.get(event.type);
     if (buffer) {
       buffer.push(event);
-      // Trim to max size
       while (buffer.length > MAX_BUFFER_PER_TYPE) {
         buffer.shift();
       }
     }
-
-    // Emit typed event
     this.emit(event.type, event);
-    // Emit generic event
     this.emit('event', event);
   }
 }

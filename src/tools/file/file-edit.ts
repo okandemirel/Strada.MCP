@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
-import { validatePath } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed, parseAllowedPaths } from '../../security/path-guard.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
 const inputSchema = z.object({
@@ -37,6 +37,10 @@ export class FileEditTool implements ITool {
     try {
       const { path: filePath, old_string, new_string, replace_all } = inputSchema.parse(input);
       const resolved = validatePath(filePath, context.projectPath);
+      const allowedPaths = parseAllowedPaths(process.env.ALLOWED_PATHS);
+      if (allowedPaths.length > 0 && !isPathAllowed(resolved, allowedPaths)) {
+        return { content: `Path is outside allowed paths`, isError: true };
+      }
       const content = await fs.readFile(resolved, 'utf-8');
 
       if (!content.includes(old_string)) {

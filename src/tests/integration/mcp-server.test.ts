@@ -11,9 +11,24 @@ describe('MCP Server Integration', () => {
     expect(toolRegistry).toBeDefined();
   });
 
-  it('should have empty tool registry on creation', () => {
-    const { toolRegistry } = createMcpServer();
+  it('should have empty registries before bootstrap', () => {
+    const { toolRegistry, resourceRegistry, promptRegistry } = createMcpServer();
     expect(toolRegistry.getAll()).toHaveLength(0);
+    expect(resourceRegistry.getAll()).toHaveLength(0);
+    expect(promptRegistry.getAll()).toHaveLength(0);
+  });
+
+  it('should register all tools/resources/prompts via bootstrap', async () => {
+    const { server, toolRegistry, resourceRegistry, promptRegistry } = createMcpServer();
+    const { loadConfig } = await import('../../config/config.js');
+    const { bootstrap } = await import('../../bootstrap.js');
+    const config = loadConfig();
+    bootstrap({ config, server, toolRegistry, resourceRegistry, promptRegistry });
+
+    // Verify substantial registration counts
+    expect(toolRegistry.getAll().length).toBeGreaterThanOrEqual(60);
+    expect(resourceRegistry.getAll().length).toBe(10);
+    expect(promptRegistry.getAll().length).toBe(6);
   });
 
   it('should allow registering tools to the registry', () => {

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { validatePath } from '../../security/path-guard.js';
+import { validatePath, isPathAllowed, parseAllowedPaths } from '../../security/path-guard.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 
 const inputSchema = z.object({
@@ -34,6 +34,10 @@ export class FileWriteTool implements ITool {
     try {
       const { path: filePath, content } = inputSchema.parse(input);
       const resolved = validatePath(filePath, context.projectPath);
+      const allowedPaths = parseAllowedPaths(process.env.ALLOWED_PATHS);
+      if (allowedPaths.length > 0 && !isPathAllowed(resolved, allowedPaths)) {
+        return { content: `Path is outside allowed paths`, isError: true };
+      }
       await fs.mkdir(path.dirname(resolved), { recursive: true });
       await fs.writeFile(resolved, content, 'utf-8');
       return {

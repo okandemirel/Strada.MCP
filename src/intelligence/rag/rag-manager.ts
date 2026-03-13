@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import type { StradaMcpConfig } from '../../config/config.js';
+import { createLogger } from '../../utils/logger.js';
 import { VectorStore } from './vector-store.js';
 import {
   EmbeddingClient,
@@ -37,6 +38,7 @@ class FallbackEmbeddingProvider implements EmbeddingProvider {
 }
 
 export class RagManager {
+  private readonly logger = createLogger('info', 'rag');
   private store: VectorStore | null = null;
   private embeddingClient: EmbeddingClient | null = null;
   private chunker: StructuralChunker | null = null;
@@ -68,7 +70,11 @@ export class RagManager {
         this.config.embeddingModel,
       );
     } catch {
-      // Fall back to deterministic pseudo-random embeddings
+      this.logger.warn(
+        `No embedding API key configured for "${this.config.embeddingProvider}". ` +
+        'Falling back to deterministic pseudo-random embeddings. ' +
+        'Semantic search quality will be degraded — keyword search still works.',
+      );
       provider = new FallbackEmbeddingProvider();
     }
 

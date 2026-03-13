@@ -25,3 +25,12 @@ export function isPathAllowed(filePath: string, allowedPaths: string[]): boolean
     return resolved.startsWith(normalizedAllowed + path.sep) || resolved === normalizedAllowed;
   });
 }
+
+/**
+ * Parses the ALLOWED_PATHS config string (comma-separated) into an array.
+ * Returns empty array if undefined/empty (no additional restriction).
+ */
+export function parseAllowedPaths(raw?: string): string[] {
+  if (!raw || raw.trim() === '') return [];
+  return raw.split(',').map((p) => p.trim()).filter(Boolean);
+}
