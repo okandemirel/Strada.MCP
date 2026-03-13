@@ -2,7 +2,7 @@ import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.inter
 import { HybridSearch } from '../../intelligence/rag/hybrid-search.js';
 
 export class CodeSearchRagTool implements ITool {
-  readonly name = 'code_search';
+  readonly name = 'code_search_rag';
   readonly description =
     'RAG-powered semantic code search. Finds relevant code by meaning, not just text matching. Returns ranked results with file paths, line ranges, and code snippets.';
   readonly inputSchema = {
@@ -20,7 +20,7 @@ export class CodeSearchRagTool implements ITool {
     required: ['query'],
   };
   readonly metadata: ToolMetadata = {
-    category: 'search',
+    category: 'analysis',
     requiresBridge: false,
     dangerous: false,
     readOnly: true,

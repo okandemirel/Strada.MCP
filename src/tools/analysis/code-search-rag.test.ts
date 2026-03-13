@@ -5,8 +5,8 @@ import type { ToolContext } from '../tool.interface.js';
 describe('CodeSearchRagTool', () => {
   it('should have correct metadata', () => {
     const tool = new CodeSearchRagTool();
-    expect(tool.name).toBe('code_search');
-    expect(tool.metadata.category).toBe('search');
+    expect(tool.name).toBe('code_search_rag');
+    expect(tool.metadata.category).toBe('analysis');
     expect(tool.metadata.requiresBridge).toBe(false);
     expect(tool.metadata.readOnly).toBe(true);
   });
