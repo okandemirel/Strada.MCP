@@ -27,7 +27,7 @@ const MANAGED_TYPES = new Set([
 // Types that indicate a managed reference when used as a field type suffix
 const MANAGED_SUFFIXES = ['[]', 'List', 'Dictionary', 'Array', 'HashSet'];
 
-const SYSTEM_BASE_CLASSES = new Set(STRADA_API.baseClasses.systems);
+const SYSTEM_BASE_CLASSES: Set<string> = new Set(STRADA_API.baseClasses.systems);
 
 const SERVICE_BASE_CLASSES = new Set([
   'Service',
