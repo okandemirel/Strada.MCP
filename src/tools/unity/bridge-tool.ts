@@ -97,6 +97,14 @@ export abstract class BridgeTool implements ITool {
     }
   }
 
+  /**
+   * Override in subclasses with get/set actions to allow read operations in read-only mode.
+   * Returns true if the given input represents a read-only action (e.g., action === 'get').
+   */
+  protected isReadAction(_input: Record<string, unknown>): boolean {
+    return false;
+  }
+
   /** Build the JSON-RPC params from validated input. */
   protected abstract buildRequest(input: Record<string, unknown>): Record<string, unknown>;
 

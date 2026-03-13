@@ -27,6 +27,10 @@ export class ProjectSettingsTool extends BridgeTool {
   protected readonly dangerousTool = false;
   protected override readonly toolCategory: ToolCategory = 'unity-config';
 
+  protected override isReadAction(input: Record<string, unknown>): boolean {
+    return input.action === 'get';
+  }
+
   protected buildRequest(input: Record<string, unknown>): Record<string, unknown> {
     return input;
   }
