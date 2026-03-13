@@ -1,9 +1,13 @@
-import { z } from 'zod';
+import { toJSONSchema } from 'zod';
+import type { z } from 'zod';
 
 /**
- * Convert a Zod schema to JSON Schema for MCP tool inputSchema.
- * Uses Zod v4's built-in toJSONSchema when available.
+ * Converts a Zod schema to a JSON Schema object suitable for MCP tool inputSchema.
+ * Thin wrapper around Zod v4's built-in toJSONSchema, stripping the $schema key.
  */
-export function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  return z.toJSONSchema(schema) as Record<string, unknown>;
+export function zodToJsonSchema(schema: z.ZodObject<z.ZodRawShape>): Record<string, unknown> {
+  const jsonSchema = toJSONSchema(schema) as Record<string, unknown>;
+  // Remove $schema key — MCP doesn't need it in tool inputSchema
+  const { $schema: _, ...rest } = jsonSchema;
+  return rest;
 }
