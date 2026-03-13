@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { zodToJsonSchema } from '../../utils/zod-to-json-schema.js';
 import { validatePath } from '../../security/path-guard.js';
 import { parseUnityYaml } from '../../utils/unity-yaml-parser.js';

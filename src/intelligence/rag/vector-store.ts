@@ -50,7 +50,7 @@ export class VectorStore {
   private deletedIds = new Set<number>();
 
   constructor(
-    private readonly storagePath: string,
+    storagePath: string,
     private readonly dimensions: number,
   ) {
     this.indexPath = path.join(storagePath, HNSW_INDEX_FILE);
