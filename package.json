@@ -1,0 +1,47 @@
+{
+  "name": "strada-mcp",
+  "version": "1.0.0",
+  "description": "Framework-aware Unity MCP server for Strada.Core development",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "prettier --check src/",
+    "lint:fix": "prettier --write src/"
+  },
+  "bin": {
+    "strada-mcp": "dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/okandemirel/Strada.MCP.git"
+  },
+  "keywords": ["mcp", "unity", "strada", "gamedev"],
+  "author": "okanunico",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/okandemirel/Strada.MCP/issues"
+  },
+  "homepage": "https://github.com/okandemirel/Strada.MCP#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "better-sqlite3": "^12.6.2",
+    "glob": "^13.0.6",
+    "hnswlib-node": "^3.0.0",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-c-sharp": "^0.23.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
