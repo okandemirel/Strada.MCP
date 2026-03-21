@@ -8,6 +8,13 @@ export { ResourceRegistry } from './resource-registry.js';
 export { ApiReferenceResource } from './strada/api-reference.js';
 export { NamespacesResource } from './strada/namespaces.js';
 export { ExamplesResource } from './strada/examples.js';
+export {
+  StradaModuleGraphResource,
+  StradaContainerGraphResource,
+  StradaSystemProfileResource,
+  StradaHotReloadResource,
+  StradaValidationReportResource,
+} from './strada/live-resources.js';
 
 // Unity resources
 export { ManifestResource } from './unity/manifest.js';

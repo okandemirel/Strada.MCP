@@ -2,9 +2,9 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from './server.js';
 import { bootstrap } from './bootstrap.js';
-import { BridgeManager } from './bridge/bridge-manager.js';
-import { ConnectionState } from './bridge/connection-manager.js';
+import { UnityEditorRouter } from './bridge/unity-editor-router.js';
 import { loadConfig } from './config/config.js';
+import { startHttpTransport, type HttpTransportHandle } from './http/http-transport.js';
 import { createLogger } from './utils/logger.js';
 
 async function main(): Promise<void> {
@@ -23,55 +23,52 @@ async function main(): Promise<void> {
     `${promptRegistry.getAll().length} prompts`,
   );
 
-  // Start Unity bridge (non-blocking)
-  let bridgeManager: BridgeManager | null = null;
-  if (config.unityBridgeAutoConnect) {
-    bridgeManager = BridgeManager.fromConfig(config);
-    bridgeManager.on('stateChange', (state: ConnectionState) => {
-      logger.info(`Unity bridge: ${state}`);
-      const connected = state === ConnectionState.Connected;
-      result.toolContext.unityBridgeConnected = connected;
-
-      if (connected && bridgeManager) {
-        const client = bridgeManager.client;
-        for (const tool of result.bridgeAwareTools) {
-          tool.setBridgeClient(client);
-        }
-        for (const resource of result.bridgeAwareResources) {
-          resource.setBridgeClient(client);
-        }
-      } else {
-        for (const tool of result.bridgeAwareTools) {
-          tool.setBridgeClient(null);
-        }
-        for (const resource of result.bridgeAwareResources) {
-          resource.setBridgeClient(null);
-        }
-      }
-    });
-    bridgeManager.on('error', (err: Error) => {
-      logger.warn(`Unity bridge error: ${err.message}`);
-    });
-    bridgeManager.connect().catch((err: Error) => {
-      logger.warn(`Unity bridge connect failed: ${err.message}`);
-    });
+  const unityEditorRouter = new UnityEditorRouter({
+    projectPath: config.unityProjectPath ?? process.cwd(),
+    preferredPort: config.unityBridgePort,
+    preferredInstanceId: config.unityBridgeInstanceId,
+    discoveryEnabled: config.unityBridgeDiscoveryEnabled,
+    staleAfterMs: config.unityBridgeDiscoveryTtlMs,
+    autoConnect: config.unityBridgeAutoConnect,
+    timeoutMs: config.unityBridgeTimeout,
+    logLevel: config.logLevel,
+    logger: logger.child('unity-router'),
+    toolContext: result.toolContext,
+    bridgeAwareTools: result.bridgeAwareTools,
+    bridgeAwareResources: result.bridgeAwareResources,
+    editorRouterAwareTools: result.editorRouterAwareTools,
+  });
+  const initialRouteStatus = await unityEditorRouter.initialize();
+  if (initialRouteStatus.activeInstance) {
+    logger.info(
+      `Selected Unity editor ${initialRouteStatus.activeInstance.instanceId} ` +
+      `(${initialRouteStatus.activeInstance.projectName}) on port ${initialRouteStatus.activePort} ` +
+      `via ${initialRouteStatus.selectionSource}`,
+    );
+  }
+  for (const warning of initialRouteStatus.warnings) {
+    logger.warn(warning);
   }
 
   // Transport
+  let httpTransport: HttpTransportHandle | null = null;
   if (config.transport === 'stdio') {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     logger.info('Connected via stdio transport');
   } else {
-    logger.warn('HTTP transport not yet implemented, falling back to stdio');
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
+    httpTransport = await startHttpTransport(server, {
+      host: config.httpHost,
+      port: config.httpPort,
+      logger,
+    });
   }
 
   // Graceful shutdown
   const shutdown = async () => {
     logger.info('Shutting down...');
-    bridgeManager?.destroy();
+    unityEditorRouter.destroy();
+    try { await httpTransport?.close(); } catch { /* ignore */ }
     try { await server.close(); } catch { /* ignore */ }
     process.exit(0);
   };

@@ -16,6 +16,9 @@ const configSchema = z.object({
   unityBridgePort: z.coerce.number().int().min(1).max(65535).default(7691),
   unityBridgeAutoConnect: boolFromEnv.default(true),
   unityBridgeTimeout: z.coerce.number().int().min(1000).max(30000).default(5000),
+  unityBridgeInstanceId: z.string().optional(),
+  unityBridgeDiscoveryEnabled: boolFromEnv.default(true),
+  unityBridgeDiscoveryTtlMs: z.coerce.number().int().min(1000).max(300000).default(20000),
   unityProjectPath: z.string().optional(),
 
   // RAG
@@ -52,6 +55,9 @@ export function loadConfig(): StradaMcpConfig {
     unityBridgePort: process.env.UNITY_BRIDGE_PORT,
     unityBridgeAutoConnect: process.env.UNITY_BRIDGE_AUTO_CONNECT,
     unityBridgeTimeout: process.env.UNITY_BRIDGE_TIMEOUT,
+    unityBridgeInstanceId: process.env.UNITY_BRIDGE_INSTANCE_ID,
+    unityBridgeDiscoveryEnabled: process.env.UNITY_BRIDGE_DISCOVERY_ENABLED,
+    unityBridgeDiscoveryTtlMs: process.env.UNITY_BRIDGE_DISCOVERY_TTL_MS,
     unityProjectPath: process.env.UNITY_PROJECT_PATH,
     embeddingProvider: process.env.EMBEDDING_PROVIDER,
     embeddingModel: process.env.EMBEDDING_MODEL,

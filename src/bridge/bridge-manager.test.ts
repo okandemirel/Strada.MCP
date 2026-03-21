@@ -153,6 +153,9 @@ describe('BridgeManager', () => {
       unityBridgePort: mockServer.port,
       unityBridgeAutoConnect: false,
       unityBridgeTimeout: 3000,
+      unityBridgeInstanceId: undefined,
+      unityBridgeDiscoveryEnabled: true,
+      unityBridgeDiscoveryTtlMs: 20000,
       logLevel: 'error' as const,
       // Other config fields with defaults
       transport: 'stdio' as const,

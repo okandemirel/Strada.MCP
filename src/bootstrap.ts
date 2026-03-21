@@ -8,6 +8,7 @@ import type { ITool, ToolContext } from './tools/tool.interface.js';
 import type { IResource } from './resources/resource.interface.js';
 import type { IPrompt } from './prompts/prompt.interface.js';
 import type { StradaMcpConfig } from './config/config.js';
+import type { EditorRouterAware } from './bridge/unity-editor-router.js';
 import { parseAllowedPaths } from './security/path-guard.js';
 
 // --- Tool imports (barrel exports) ---
@@ -29,7 +30,10 @@ import {
   ComponentCreateTool, SystemCreateTool, ModuleCreateTool,
   MediatorCreateTool, ServiceCreateTool, ControllerCreateTool,
   ModelCreateTool, ProjectAnalyzeTool, ArchitectureValidateTool,
-  FeatureScaffoldTool,
+  FeatureScaffoldTool, StradaModuleGraphTool, StradaContainerGraphTool,
+  StradaValidateArchitectureLiveTool, StradaValidateModulesLiveTool,
+  StradaSystemProfileTool, StradaHotReloadStatusTool,
+  StradaHotReloadControlTool, StradaLogModulesTool,
 } from './tools/strada/index.js';
 import {
   CreateGameObjectTool, FindGameObjectsTool, ModifyGameObjectTool,
@@ -39,6 +43,12 @@ import {
   PlayModeTool, GetPlayStateTool, ExecuteMenuTool,
   ConsoleLogTool, ConsoleClearTool, ConsoleReadTool, ConsoleAnalyzeTool,
   SelectionGetTool, SelectionSetTool, BuildPipelineTool, PackageManageTool, EditorPreferencesTool,
+  CompileStatusTool, CompileWaitTool, RecompileTool, AssemblyReloadStatusTool,
+  TestListTool, TestRunTool, TestResultsTool, TestRerunFailedTool,
+  ScreenshotCaptureTool, ScreenshotCompareTool, VisualSnapshotTool,
+  ProjectToolListTool, ProjectToolInvokeTool, VerifyChangeTool, EditorInstancesTool, UnityEditorRouteTool,
+  UiQueryTool, UiActionTool, InputSimulateTool, CameraManageTool,
+  GraphicsManageTool, AddressablesManageTool, ImportSettingsManageTool,
 } from './tools/unity/index.js';
 import {
   SceneCreateTool, SceneOpenTool, SceneSaveTool, SceneInfoTool,
@@ -60,14 +70,30 @@ import {
 import {
   BatchExecuteTool, ScriptExecuteTool, ScriptValidateTool,
   CSharpReflectionTool, UnityProfilerTool,
+  UnityReflectApiTool, UnityFixCompileLoopTool,
 } from './tools/advanced/index.js';
+import { CodeSearchRagTool } from './tools/analysis/code-search-rag.js';
+import { ProjectHealthTool } from './tools/analysis/project-health.js';
+import { CSharpParseTool } from './tools/analysis/csharp-parse.js';
+import { RagIndexTool } from './tools/analysis/rag-index.js';
+import { RagStatusTool } from './tools/analysis/rag-status.js';
+import { CodeQualityTool } from './tools/analysis/code-quality.js';
+import { DependencyGraphTool } from './tools/analysis/dependency-graph.js';
+import { UnityDocsLookupTool } from './tools/analysis/unity-docs-lookup.js';
+import {
+  CSharpSymbolSearchTool,
+  CSharpSymbolReferencesTool,
+  CSharpRenamePreviewTool,
+  CSharpApplySymbolEditsTool,
+} from './tools/analysis/csharp-symbol-tools.js';
 
 // --- Resource imports ---
 import {
   ApiReferenceResource, NamespacesResource, ExamplesResource,
   ManifestResource, ProjectSettingsResource, AsmdefListResource,
   FileStatsResource, SceneHierarchyResource, ConsoleLogsResource,
-  PlayStateResource,
+  PlayStateResource, StradaModuleGraphResource, StradaContainerGraphResource,
+  StradaSystemProfileResource, StradaHotReloadResource, StradaValidationReportResource,
 } from './resources/index.js';
 
 // --- Prompt imports ---
@@ -85,6 +111,10 @@ function hasBridgeClient(obj: unknown): obj is BridgeAware {
   return typeof obj === 'object' && obj !== null && 'setBridgeClient' in obj;
 }
 
+function hasEditorRouter(obj: unknown): obj is EditorRouterAware {
+  return typeof obj === 'object' && obj !== null && 'setEditorRouter' in obj;
+}
+
 export interface BootstrapOptions {
   config: StradaMcpConfig;
   server: McpServer;
@@ -99,6 +129,7 @@ export interface BootstrapResult {
   prompts: IPrompt[];
   bridgeAwareTools: BridgeAware[];
   bridgeAwareResources: BridgeAware[];
+  editorRouterAwareTools: EditorRouterAware[];
   toolContext: ToolContext;
 }
 
@@ -145,7 +176,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new DotnetBuildTool(),
     new DotnetTestTool(),
 
-    // Strada tools (10)
+    // Strada tools (18)
     new ComponentCreateTool(),
     new SystemCreateTool(),
     new ModuleCreateTool(),
@@ -156,8 +187,16 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new ProjectAnalyzeTool(),
     new ArchitectureValidateTool(),
     new FeatureScaffoldTool(),
+    new StradaModuleGraphTool(),
+    new StradaContainerGraphTool(),
+    new StradaValidateArchitectureLiveTool(),
+    new StradaValidateModulesLiveTool(),
+    new StradaSystemProfileTool(),
+    new StradaHotReloadStatusTool(),
+    new StradaHotReloadControlTool(),
+    new StradaLogModulesTool(),
 
-    // Unity tools (23)
+    // Unity tools (46)
     new CreateGameObjectTool(),
     new FindGameObjectsTool(),
     new ModifyGameObjectTool(),
@@ -181,6 +220,29 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new BuildPipelineTool(),
     new PackageManageTool(),
     new EditorPreferencesTool(),
+    new CompileStatusTool(),
+    new CompileWaitTool(),
+    new RecompileTool(),
+    new AssemblyReloadStatusTool(),
+    new TestListTool(),
+    new TestRunTool(),
+    new TestResultsTool(),
+    new TestRerunFailedTool(),
+    new ScreenshotCaptureTool(),
+    new ScreenshotCompareTool(),
+    new VisualSnapshotTool(),
+    new ProjectToolListTool(),
+    new ProjectToolInvokeTool(),
+    new VerifyChangeTool(),
+    new EditorInstancesTool(),
+    new UnityEditorRouteTool(),
+    new UiQueryTool(),
+    new UiActionTool(),
+    new InputSimulateTool(),
+    new CameraManageTool(),
+    new GraphicsManageTool(),
+    new AddressablesManageTool(),
+    new ImportSettingsManageTool(),
 
     // Unity Scene tools (8)
     new SceneCreateTool(),
@@ -216,21 +278,41 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new BuildSettingsTool(),
     new ProjectSettingsToolConfig(),
 
-    // Advanced tools (5) - some have special constructors
+    // Analysis tools (11)
+    new CodeSearchRagTool(),
+    new ProjectHealthTool(),
+    new CSharpParseTool(),
+    new RagIndexTool(),
+    new RagStatusTool(),
+    new CodeQualityTool(),
+    new DependencyGraphTool(),
+    new UnityDocsLookupTool(),
+    new CSharpSymbolSearchTool(),
+    new CSharpSymbolReferencesTool(),
+    new CSharpRenamePreviewTool(),
+
+    // Advanced tools (8) - some have special constructors
     new BatchExecuteTool(toolRegistry),
     new ScriptExecuteTool({ scriptExecuteEnabled: config.scriptExecuteEnabled }),
     new ScriptValidateTool(),
     new CSharpReflectionTool({ reflectionInvokeEnabled: config.reflectionInvokeEnabled }),
     new UnityProfilerTool(),
+    new CSharpApplySymbolEditsTool(),
+    new UnityReflectApiTool(),
+    new UnityFixCompileLoopTool(),
   ];
 
   const bridgeAwareTools: BridgeAware[] = [];
+  const editorRouterAwareTools: EditorRouterAware[] = [];
 
   for (const tool of tools) {
     toolRegistry.register(tool);
 
     if (hasBridgeClient(tool)) {
       bridgeAwareTools.push(tool);
+    }
+    if (hasEditorRouter(tool)) {
+      editorRouterAwareTools.push(tool);
     }
 
     // Bind to MCP server using registerTool with passthrough input schema.
@@ -260,6 +342,11 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new ApiReferenceResource(),
     new NamespacesResource(),
     new ExamplesResource(),
+    new StradaModuleGraphResource(),
+    new StradaContainerGraphResource(),
+    new StradaSystemProfileResource(),
+    new StradaHotReloadResource(),
+    new StradaValidationReportResource(),
 
     // Unity resources (require projectPath)
     new ManifestResource(projectPath),
@@ -364,6 +451,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     prompts,
     bridgeAwareTools,
     bridgeAwareResources,
+    editorRouterAwareTools,
     toolContext,
   };
 }

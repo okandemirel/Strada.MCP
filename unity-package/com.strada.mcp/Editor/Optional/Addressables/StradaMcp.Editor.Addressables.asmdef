@@ -1,0 +1,29 @@
+{
+  "name": "StradaMcp.Editor.Addressables",
+  "rootNamespace": "Strada.Mcp.Editor.Integration.Addressables",
+  "references": [
+    "StradaMcp.Editor",
+    "StradaMcp.Runtime",
+    "Unity.Addressables.Editor",
+    "Unity.Addressables"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_ADDRESSABLES_PRESENT"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.addressables",
+      "expression": "[0.0.0,999.0.0)",
+      "define": "UNITY_ADDRESSABLES_PRESENT"
+    }
+  ],
+  "noEngineReferences": false
+}

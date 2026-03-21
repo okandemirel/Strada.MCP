@@ -27,7 +27,7 @@ describe('MCP Server Integration', () => {
 
     // Verify substantial registration counts
     expect(toolRegistry.getAll().length).toBeGreaterThanOrEqual(60);
-    expect(resourceRegistry.getAll().length).toBe(10);
+    expect(resourceRegistry.getAll().length).toBe(15);
     expect(promptRegistry.getAll().length).toBe(6);
   });
 

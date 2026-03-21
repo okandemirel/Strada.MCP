@@ -85,12 +85,16 @@ namespace Strada.Mcp.Editor
                 TransformCommands.Register(Dispatcher);
                 EditorCommands.Register(Dispatcher);
                 ProjectCommands.Register(Dispatcher);
+                DiagnosticsCommands.Register(Dispatcher);
+                ProductivityCommands.Register(Dispatcher);
+                StradaCommands.Register(Dispatcher);
 
                 // Create event broadcaster
                 Broadcaster = new EventBroadcaster(Server);
 
                 // Start listening
                 Server.Start();
+                EditorInstanceRegistry.Start(port);
 
                 Debug.Log($"[Strada.MCP] Bridge initialized with {Dispatcher.HandlerCount} handlers on port {port}");
             }
@@ -123,6 +127,7 @@ namespace Strada.Mcp.Editor
             }
 
             Dispatcher = null;
+            EditorInstanceRegistry.Stop();
 
             Debug.Log("[Strada.MCP] Bridge shut down");
         }

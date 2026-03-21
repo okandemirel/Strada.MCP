@@ -1,0 +1,29 @@
+{
+  "name": "StradaMcp.Editor.StradaCore",
+  "rootNamespace": "Strada.Mcp.Editor.Integration.StradaCore",
+  "references": [
+    "StradaMcp.Editor",
+    "StradaMcp.Runtime",
+    "Strada.Core",
+    "Strada.Core.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "STRADA_CORE_PRESENT"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.strada.core",
+      "expression": "[0.0.0,999.0.0)",
+      "define": "STRADA_CORE_PRESENT"
+    }
+  ],
+  "noEngineReferences": false
+}

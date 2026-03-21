@@ -1,0 +1,29 @@
+{
+  "name": "StradaMcp.Editor.TestFramework",
+  "rootNamespace": "Strada.Mcp.Editor.Integration.TestFramework",
+  "references": [
+    "StradaMcp.Editor",
+    "StradaMcp.Runtime",
+    "UnityEditor.TestRunner",
+    "UnityEngine.TestRunner"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_TEST_FRAMEWORK_PRESENT"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.test-framework",
+      "expression": "[0.0.0,999.0.0)",
+      "define": "UNITY_TEST_FRAMEWORK_PRESENT"
+    }
+  ],
+  "noEngineReferences": false
+}

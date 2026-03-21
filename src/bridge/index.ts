@@ -30,6 +30,24 @@ export { BridgeClient, type BridgeClientOptions } from './bridge-client.js';
 export { EventHandler } from './event-handler.js';
 
 export { BridgeManager, type BridgeManagerOptions } from './bridge-manager.js';
+export {
+  DEFAULT_EDITOR_INSTANCE_REGISTRY_DIR,
+  DEFAULT_EDITOR_INSTANCE_TTL_MS,
+  discoverUnityEditorInstances,
+  resolveUnityEditorTarget,
+  type UnityEditorInstanceInfo,
+  type UnityEditorTargetResolution,
+  type DiscoverUnityEditorInstancesOptions,
+  type ResolveUnityEditorTargetOptions,
+} from './editor-instance-registry.js';
+export {
+  UnityEditorRouter,
+  type EditorRouterAware,
+  type UnityEditorRouteRequest,
+  type UnityEditorRouteStatus,
+  type UnityEditorRouteResult,
+  type UnityEditorRouterOptions,
+} from './unity-editor-router.js';
 
 // Brain Bridge (Phase 14)
 export {

@@ -21,18 +21,25 @@ import { RagIndexTool } from '../../tools/analysis/rag-index.js';
 import { RagStatusTool } from '../../tools/analysis/rag-status.js';
 import { CodeQualityTool } from '../../tools/analysis/code-quality.js';
 import { DependencyGraphTool } from '../../tools/analysis/dependency-graph.js';
+import { UnityDocsLookupTool } from '../../tools/analysis/unity-docs-lookup.js';
+import {
+  CSharpSymbolSearchTool,
+  CSharpSymbolReferencesTool,
+  CSharpRenamePreviewTool,
+  CSharpApplySymbolEditsTool,
+} from '../../tools/analysis/csharp-symbol-tools.js';
 
 function createAllTools() {
   const tools = [];
 
-  // Unity runtime tools (18)
+  // Unity runtime tools (46)
   for (const Ctor of Object.values(unity)) {
     if (typeof Ctor === 'function' && Ctor.name !== 'BridgeTool') {
       tools.push(new (Ctor as new () => InstanceType<typeof Ctor>)());
     }
   }
 
-  // Strada tools (10)
+  // Strada tools (18)
   for (const Ctor of Object.values(strada)) {
     if (typeof Ctor === 'function') {
       tools.push(new (Ctor as new () => InstanceType<typeof Ctor>)());
@@ -102,7 +109,7 @@ function createAllTools() {
     }
   }
 
-  // Analysis tools (7) — no barrel, import individually
+  // Analysis tools (11) — no barrel, import individually
   tools.push(new CodeSearchRagTool());
   tools.push(new ProjectHealthTool());
   tools.push(new CSharpParseTool());
@@ -110,6 +117,11 @@ function createAllTools() {
   tools.push(new RagStatusTool());
   tools.push(new CodeQualityTool());
   tools.push(new DependencyGraphTool());
+  tools.push(new UnityDocsLookupTool());
+  tools.push(new CSharpSymbolSearchTool());
+  tools.push(new CSharpSymbolReferencesTool());
+  tools.push(new CSharpRenamePreviewTool());
+  tools.push(new CSharpApplySymbolEditsTool());
 
   return tools;
 }
@@ -126,9 +138,9 @@ describe('Tool Registry Integration', () => {
     expect(registry.getAll().length).toBe(tools.length);
   });
 
-  it('should have 83 total tools', () => {
+  it('should have 126 total tools', () => {
     const tools = createAllTools();
-    expect(tools.length).toBe(83);
+    expect(tools.length).toBe(126);
   });
 
   it('should have no duplicate tool names', () => {
@@ -146,18 +158,18 @@ describe('Tool Registry Integration', () => {
     }
 
     const expected: Record<ToolCategory, number> = {
-      'unity-runtime': 18,
-      'strada': 10,
+      'unity-runtime': 42,
+      'strada': 18,
       'file': 6,
       'search': 3,
       'git': 6,
       'dotnet': 2,
-      'advanced': 5,
+      'advanced': 8,
       'unity-scene': 8,
-      'unity-asset': 8,
+      'unity-asset': 10,
       'unity-subsystem': 6,
-      'unity-config': 4,
-      'analysis': 7,
+      'unity-config': 6,
+      'analysis': 11,
     };
 
     for (const [category, count] of Object.entries(expected)) {

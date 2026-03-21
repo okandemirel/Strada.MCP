@@ -50,6 +50,8 @@ namespace Strada.Mcp.Editor.Events
             IEnumerable<string> types = null,
             bool includeStackTrace = true)
         {
+            var filtered = SnapshotEntries(limit, types, includeStackTrace, null, null);
+
             List<Dictionary<string, object>> copy;
             lock (Gate)
             {
@@ -72,6 +74,59 @@ namespace Strada.Mcp.Editor.Events
                 }).ToList();
             }
 
+            return new Dictionary<string, object>
+            {
+                { "entries", filtered },
+                { "totalCount", copy.Count }
+            };
+        }
+
+        public static List<Dictionary<string, object>> SnapshotEntries(
+            int limit = 100,
+            IEnumerable<string> types = null,
+            bool includeStackTrace = true,
+            string category = null,
+            long? sinceTimestamp = null)
+        {
+            List<Dictionary<string, object>> copy;
+            lock (Gate)
+            {
+                copy = Entries.Select(CloneEntry).ToList();
+            }
+
+            var typeSet = types != null
+                ? new HashSet<string>(types.Where(t => !string.IsNullOrEmpty(t)).Select(t => t.ToLowerInvariant()))
+                : null;
+
+            if (typeSet != null && typeSet.Count > 0)
+            {
+                copy = copy.Where(entry =>
+                {
+                    if (!entry.TryGetValue("type", out object rawType) || rawType == null)
+                    {
+                        return false;
+                    }
+                    return typeSet.Contains(rawType.ToString().ToLowerInvariant());
+                }).ToList();
+            }
+
+            if (!string.IsNullOrEmpty(category))
+            {
+                copy = copy.Where(entry =>
+                {
+                    if (!entry.TryGetValue("category", out object rawCategory) || rawCategory == null)
+                    {
+                        return false;
+                    }
+                    return string.Equals(rawCategory.ToString(), category, StringComparison.OrdinalIgnoreCase);
+                }).ToList();
+            }
+
+            if (sinceTimestamp.HasValue)
+            {
+                copy = copy.Where(entry => GetTimestamp(entry) >= sinceTimestamp.Value).ToList();
+            }
+
             if (!includeStackTrace)
             {
                 foreach (var entry in copy)
@@ -85,11 +140,7 @@ namespace Strada.Mcp.Editor.Events
                 .Take(Math.Max(1, limit))
                 .ToList();
 
-            return new Dictionary<string, object>
-            {
-                { "entries", filtered },
-                { "totalCount", copy.Count }
-            };
+            return filtered;
         }
 
         private static long GetTimestamp(Dictionary<string, object> entry)

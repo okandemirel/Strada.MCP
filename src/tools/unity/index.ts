@@ -48,4 +48,43 @@ export {
   EditorPreferencesTool,
 } from './management-tools.js';
 
-// Total: 23 tools
+// Unity diagnostics and verification tools (14)
+export {
+  CompileStatusTool,
+  CompileWaitTool,
+  RecompileTool,
+  AssemblyReloadStatusTool,
+  TestListTool,
+  TestRunTool,
+  TestResultsTool,
+  TestRerunFailedTool,
+  ScreenshotCaptureTool,
+  ScreenshotCompareTool,
+  VisualSnapshotTool,
+  ProjectToolListTool,
+  ProjectToolInvokeTool,
+  VerifyChangeTool,
+} from './diagnostics-tools.js';
+
+// Unity editor instance discovery tools (1)
+export {
+  EditorInstancesTool,
+} from './editor-instance-tools.js';
+
+// Unity editor routing tools (1)
+export {
+  UnityEditorRouteTool,
+} from './editor-route-tool.js';
+
+// Unity editor productivity tools (7)
+export {
+  UiQueryTool,
+  UiActionTool,
+  InputSimulateTool,
+  CameraManageTool,
+  GraphicsManageTool,
+  AddressablesManageTool,
+  ImportSettingsManageTool,
+} from './productivity-tools.js';
+
+// Total: 46 tools

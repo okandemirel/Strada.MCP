@@ -8,3 +8,13 @@ export { ModelCreateTool } from './model-create.js';
 export { ProjectAnalyzeTool } from './project-analyze.js';
 export { ArchitectureValidateTool } from './architecture-validate.js';
 export { FeatureScaffoldTool } from './feature-scaffold.js';
+export {
+  StradaModuleGraphTool,
+  StradaContainerGraphTool,
+  StradaValidateArchitectureLiveTool,
+  StradaValidateModulesLiveTool,
+  StradaSystemProfileTool,
+  StradaHotReloadStatusTool,
+  StradaHotReloadControlTool,
+  StradaLogModulesTool,
+} from './live-tools.js';
