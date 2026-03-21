@@ -8,6 +8,7 @@ using System.Threading;
 using Strada.Mcp.Editor.Server;
 using Strada.Mcp.Runtime;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.PackageManager;
 using UnityEditor.PackageManager.Requests;
@@ -37,6 +38,7 @@ namespace Strada.Mcp.Editor.Commands
         {
             string action = GameObjectCommands.GetString(@params, "action", "get");
             var group = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(group);
 
             if (action == "set")
             {
@@ -49,24 +51,24 @@ namespace Strada.Mcp.Editor.Commands
                 if (settings.TryGetValue("productName", out object productName) && productName != null)
                     PlayerSettings.productName = productName.ToString();
                 if (settings.TryGetValue("bundleIdentifier", out object bundleIdentifier) && bundleIdentifier != null)
-                    PlayerSettings.SetApplicationIdentifier(group, bundleIdentifier.ToString());
+                    PlayerSettings.SetApplicationIdentifier(namedBuildTarget, bundleIdentifier.ToString());
                 if (settings.TryGetValue("applicationIdentifier", out object appId) && appId != null)
-                    PlayerSettings.SetApplicationIdentifier(group, appId.ToString());
+                    PlayerSettings.SetApplicationIdentifier(namedBuildTarget, appId.ToString());
                 if (settings.TryGetValue("colorSpace", out object colorSpace) && colorSpace != null
                     && Enum.TryParse(colorSpace.ToString(), true, out ColorSpace parsedColorSpace))
                     PlayerSettings.colorSpace = parsedColorSpace;
                 if (settings.TryGetValue("scriptingBackend", out object scriptingBackend) && scriptingBackend != null
                     && Enum.TryParse(scriptingBackend.ToString(), true, out ScriptingImplementation parsedBackend))
-                    PlayerSettings.SetScriptingBackend(group, parsedBackend);
+                    PlayerSettings.SetScriptingBackend(namedBuildTarget, parsedBackend);
             }
 
             return new Dictionary<string, object>
             {
                 { "companyName", PlayerSettings.companyName },
                 { "productName", PlayerSettings.productName },
-                { "bundleIdentifier", PlayerSettings.GetApplicationIdentifier(group) },
-                { "applicationIdentifier", PlayerSettings.GetApplicationIdentifier(group) },
-                { "scriptingBackend", PlayerSettings.GetScriptingBackend(group).ToString() },
+                { "bundleIdentifier", PlayerSettings.GetApplicationIdentifier(namedBuildTarget) },
+                { "applicationIdentifier", PlayerSettings.GetApplicationIdentifier(namedBuildTarget) },
+                { "scriptingBackend", PlayerSettings.GetScriptingBackend(namedBuildTarget).ToString() },
                 { "colorSpace", PlayerSettings.colorSpace.ToString() },
                 { "activeBuildTargetGroup", group.ToString() }
             };

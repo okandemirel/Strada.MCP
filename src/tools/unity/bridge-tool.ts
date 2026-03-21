@@ -28,6 +28,9 @@ export abstract class BridgeTool implements ITool {
   /** Override to change the tool category from the default 'unity-runtime'. */
   protected readonly toolCategory: ToolCategory = 'unity-runtime';
 
+  /** Override when a tool needs bridge features beyond the raw JSON-RPC method. */
+  protected readonly requiredBridgeCapabilities: readonly string[] = [];
+
   private bridgeClient: BridgeClient | null = null;
   private _inputSchema: Record<string, unknown> | null = null;
 
@@ -44,6 +47,8 @@ export abstract class BridgeTool implements ITool {
       requiresBridge: true,
       dangerous: this.dangerousTool,
       readOnly: this.readOnlyTool,
+      requiredBridgeMethods: [this.rpcMethod],
+      requiredBridgeCapabilities: [...this.requiredBridgeCapabilities],
     };
   }
 
@@ -52,12 +57,16 @@ export abstract class BridgeTool implements ITool {
     this.bridgeClient = client;
   }
 
+  protected get client(): BridgeClient | null {
+    return this.bridgeClient;
+  }
+
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const start = performance.now();
 
     try {
       // Check bridge connection
-      if (!context.unityBridgeConnected || !this.bridgeClient) {
+      if (!context.unityBridgeConnected || !this.client) {
         return {
           content: `Error: Unity bridge is not connected. Cannot execute ${this.name}.`,
           isError: true,
@@ -77,7 +86,7 @@ export abstract class BridgeTool implements ITool {
 
       // Build RPC params and send request
       const params = this.buildRequest(parsed as Record<string, unknown>);
-      const result = await this.bridgeClient.request(this.rpcMethod, params);
+      const result = await this.client.request(this.rpcMethod, params);
 
       // Format response
       const content = this.formatResponse(result);

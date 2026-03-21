@@ -92,6 +92,11 @@ describe('BridgeTool', () => {
       expect(tool.metadata.dangerous).toBe(false);
       expect(writeTool.metadata.dangerous).toBe(true);
     });
+
+    it('should expose the required bridge methods in metadata', () => {
+      expect(tool.metadata.requiredBridgeMethods).toEqual(['test.method']);
+      expect(writeTool.metadata.requiredBridgeMethods).toEqual(['write.method']);
+    });
   });
 
   describe('inputSchema', () => {

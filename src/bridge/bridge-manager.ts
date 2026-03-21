@@ -72,6 +72,7 @@ export class BridgeManager extends EventEmitter {
   async connect(): Promise<void> {
     this.logger.info('Connecting to Unity...');
     await this.connectionManager.connect();
+    await this.bridgeClient.ensureCapabilities();
     this.logger.info('Connected to Unity');
   }
 

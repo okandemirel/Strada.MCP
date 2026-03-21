@@ -143,7 +143,7 @@ namespace Strada.Mcp.Editor.Server
     public class JsonRpcException : Exception
     {
         public int Code { get; }
-        public object Data { get; }
+        public new object Data { get; }
 
         public JsonRpcException(int code, string message, object data = null)
             : base(message)

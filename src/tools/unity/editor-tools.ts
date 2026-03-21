@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import type { ToolContext, ToolMetadata, ToolResult } from '../tool.interface.js';
 import { BridgeTool } from './bridge-tool.js';
+import { getStaticConsoleSnapshot } from './local-diagnostics.js';
 
 // ---------------------------------------------------------------------------
 // unity_console_log
@@ -83,13 +85,55 @@ export class ConsoleReadTool extends BridgeTool {
   protected readonly schema = consoleReadSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['editor.console-logs'];
+
+  override get metadata(): ToolMetadata {
+    return {
+      ...super.metadata,
+      requiresBridge: false,
+    };
+  }
 
   protected buildRequest(input: Record<string, unknown>): Record<string, unknown> {
     return input;
   }
 
+  override async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+    const start = performance.now();
+    const parsed = this.schema.parse(input);
+
+    try {
+      if (!context.unityBridgeConnected || !this.client) {
+        throw new Error('Unity bridge is not connected.');
+      }
+
+      const result = await this.client.request(this.rpcMethod, this.buildRequest(parsed));
+      const content = this.formatResponse({
+        source: 'live_bridge',
+        bridgeMethod: this.rpcMethod,
+        ...(result as Record<string, unknown>),
+      });
+      return {
+        content,
+        metadata: { executionTimeMs: Math.round(performance.now() - start) },
+      };
+    } catch (error) {
+      const fallback = await getStaticConsoleSnapshot({
+        projectPath: context.projectPath,
+        limit: parsed.limit,
+        includeStackTrace: parsed.includeStackTrace,
+        types: parsed.types,
+        bridgeError: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        content: this.formatResponse(fallback),
+        metadata: { executionTimeMs: Math.round(performance.now() - start) },
+      };
+    }
+  }
+
   protected formatResponse(result: unknown): string {
-    const snapshot = result as ConsoleLogSnapshot;
+    const snapshot = result as ConsoleLogSnapshot & { source?: string; bridgeError?: string };
     const entries = snapshot.entries ?? [];
     const counts = entries.reduce<Record<string, number>>((acc, entry) => {
       const key = String(entry.type ?? 'unknown').toLowerCase();
@@ -97,9 +141,14 @@ export class ConsoleReadTool extends BridgeTool {
       return acc;
     }, {});
     const lines = [
+      `Diagnostics source: ${snapshot.source ?? 'live_bridge'}`,
       `Unity console snapshot: ${entries.length}/${snapshot.totalCount ?? entries.length} entries`,
       `Counts: ${Object.entries(counts).map(([key, value]) => `${key}=${value}`).join(', ') || 'none'}`,
     ];
+
+    if (snapshot.bridgeError) {
+      lines.push(`Live bridge fallback: ${snapshot.bridgeError}`);
+    }
 
     for (const entry of entries.slice(0, 10)) {
       lines.push(
@@ -129,6 +178,14 @@ export class ConsoleAnalyzeTool extends BridgeTool {
   protected readonly schema = consoleAnalyzeSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['editor.console-logs'];
+
+  override get metadata(): ToolMetadata {
+    return {
+      ...super.metadata,
+      requiresBridge: false,
+    };
+  }
 
   protected buildRequest(input: Record<string, unknown>): Record<string, unknown> {
     const includeWarnings = Boolean(input.includeWarnings ?? true);
@@ -139,11 +196,53 @@ export class ConsoleAnalyzeTool extends BridgeTool {
     };
   }
 
+  override async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+    const start = performance.now();
+    const parsed = this.schema.parse(input);
+    const request = this.buildRequest(parsed);
+
+    try {
+      if (!context.unityBridgeConnected || !this.client) {
+        throw new Error('Unity bridge is not connected.');
+      }
+
+      const result = await this.client.request(this.rpcMethod, request);
+      return {
+        content: this.formatResponse({
+          source: 'live_bridge',
+          bridgeMethod: this.rpcMethod,
+          ...(result as Record<string, unknown>),
+        }),
+        metadata: { executionTimeMs: Math.round(performance.now() - start) },
+      };
+    } catch (error) {
+      const fallback = await getStaticConsoleSnapshot({
+        projectPath: context.projectPath,
+        limit: Number(request.limit ?? 100),
+        includeStackTrace: true,
+        types: (request.types as string[] | undefined),
+        bridgeError: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        content: this.formatResponse(fallback),
+        metadata: { executionTimeMs: Math.round(performance.now() - start) },
+      };
+    }
+  }
+
   protected formatResponse(result: unknown): string {
-    const snapshot = result as ConsoleLogSnapshot;
+    const snapshot = result as ConsoleLogSnapshot & { source?: string; bridgeError?: string };
     const entries = (snapshot.entries ?? []).filter((entry) => Boolean(entry.message));
     if (entries.length === 0) {
-      return 'Unity console analysis: no recent logs to analyze.';
+      const lines = [
+        `Diagnostics source: ${snapshot.source ?? 'live_bridge'}`,
+        'Unity console analysis: no recent logs to analyze.',
+      ];
+      if (snapshot.bridgeError) {
+        lines.push(`Live bridge fallback: ${snapshot.bridgeError}`);
+      }
+      lines.push('', JSON.stringify(result, null, 2));
+      return lines.join('\n');
     }
 
     const grouped = new Map<string, { count: number; severity: number; sample: ConsoleLogEntry }>();
@@ -164,7 +263,13 @@ export class ConsoleAnalyzeTool extends BridgeTool {
       return b.count - a.count;
     });
 
-    const lines = [`Unity console analysis: ${ordered.length} grouped issue(s)`];
+    const lines = [
+      `Diagnostics source: ${snapshot.source ?? 'live_bridge'}`,
+      `Unity console analysis: ${ordered.length} grouped issue(s)`,
+    ];
+    if (snapshot.bridgeError) {
+      lines.push(`Live bridge fallback: ${snapshot.bridgeError}`);
+    }
     ordered.slice(0, 10).forEach((group, index) => {
       const entry = group.sample;
       lines.push(
