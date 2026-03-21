@@ -35,8 +35,17 @@ export {
 export {
   ConsoleLogTool,
   ConsoleClearTool,
+  ConsoleReadTool,
+  ConsoleAnalyzeTool,
   SelectionGetTool,
   SelectionSetTool,
 } from './editor-tools.js';
 
-// Total: 18 tools
+// Unity runtime management tools (3)
+export {
+  BuildPipelineTool,
+  PackageManageTool,
+  EditorPreferencesTool,
+} from './management-tools.js';
+
+// Total: 23 tools

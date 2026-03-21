@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Strada.Mcp.Editor.Events;
 using Strada.Mcp.Editor.Server;
 using Strada.Mcp.Runtime;
 using UnityEditor;
@@ -22,6 +23,8 @@ namespace Strada.Mcp.Editor.Commands
             dispatcher.RegisterHandler("editor.executeMenu", ExecuteMenu);
             dispatcher.RegisterHandler("editor.log", Log);
             dispatcher.RegisterHandler("editor.clearConsole", ClearConsole);
+            dispatcher.RegisterHandler("editor.getConsoleLogs", GetConsoleLogs);
+            dispatcher.RegisterHandler("unity/console/logs", GetConsoleLogs);
             dispatcher.RegisterHandler("editor.getSelection", GetSelection);
             dispatcher.RegisterHandler("editor.setSelection", SetSelection);
         }
@@ -155,6 +158,30 @@ namespace Strada.Mcp.Editor.Commands
         }
 
         /// <summary>
+        /// Returns a structured snapshot of recent Unity console logs.
+        /// Params: limit? (int), types? (string[]), includeStackTrace? (bool)
+        /// </summary>
+        private static object GetConsoleLogs(Dictionary<string, object> @params)
+        {
+            int limit = GameObjectCommands.GetInt(@params, "limit", 100);
+            bool includeStackTrace = GameObjectCommands.GetBool(@params, "includeStackTrace", true);
+            var types = new List<string>();
+
+            if (@params != null && @params.TryGetValue("types", out object rawTypes) && rawTypes is System.Collections.IList list)
+            {
+                foreach (var item in list)
+                {
+                    if (item != null)
+                    {
+                        types.Add(item.ToString());
+                    }
+                }
+            }
+
+            return ConsoleLogBuffer.Snapshot(limit, types.Count > 0 ? types : null, includeStackTrace);
+        }
+
+        /// <summary>
         /// Returns the current editor selection.
         /// </summary>
         private static object GetSelection(Dictionary<string, object> @params)
@@ -195,37 +222,57 @@ namespace Strada.Mcp.Editor.Commands
         /// </summary>
         private static object SetSelection(Dictionary<string, object> @params)
         {
-            if (!@params.ContainsKey("targets"))
-                throw new JsonRpcException(ErrorCode.InvalidParams, "targets is required");
-
-            object targetsRaw = @params["targets"];
-            var targetNames = new List<string>();
-
-            if (targetsRaw is System.Collections.IList list)
-            {
-                foreach (var item in list)
-                {
-                    if (item != null) targetNames.Add(item.ToString());
-                }
-            }
-            else if (targetsRaw is string singleTarget)
-            {
-                targetNames.Add(singleTarget);
-            }
-
             var objects = new List<UnityEngine.Object>();
             var notFound = new List<string>();
 
-            foreach (string name in targetNames)
+            if (@params.TryGetValue("instanceIds", out object instanceIdsRaw) && instanceIdsRaw is System.Collections.IList instanceIdList)
             {
-                try
+                foreach (var item in instanceIdList)
                 {
-                    var go = GameObjectCommands.FindGameObject(name);
-                    objects.Add(go);
+                    if (item == null) continue;
+                    int instanceId = Convert.ToInt32(item);
+                    var obj = EditorUtility.InstanceIDToObject(instanceId);
+                    if (obj != null)
+                    {
+                        objects.Add(obj);
+                    }
+                    else
+                    {
+                        notFound.Add(instanceId.ToString());
+                    }
                 }
-                catch (JsonRpcException)
+            }
+            else
+            {
+                if (!@params.ContainsKey("targets"))
+                    throw new JsonRpcException(ErrorCode.InvalidParams, "targets or instanceIds is required");
+
+                object targetsRaw = @params["targets"];
+                var targetNames = new List<string>();
+
+                if (targetsRaw is System.Collections.IList list)
                 {
-                    notFound.Add(name);
+                    foreach (var item in list)
+                    {
+                        if (item != null) targetNames.Add(item.ToString());
+                    }
+                }
+                else if (targetsRaw is string singleTarget)
+                {
+                    targetNames.Add(singleTarget);
+                }
+
+                foreach (string name in targetNames)
+                {
+                    try
+                    {
+                        var go = GameObjectCommands.FindGameObject(name);
+                        objects.Add(go);
+                    }
+                    catch (JsonRpcException)
+                    {
+                        notFound.Add(name);
+                    }
                 }
             }
 

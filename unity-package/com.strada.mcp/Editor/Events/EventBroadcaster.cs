@@ -72,6 +72,8 @@ namespace Strada.Mcp.Editor.Events
 
         private void OnLogMessage(string condition, string stackTrace, LogType type)
         {
+            ConsoleLogBuffer.Record(condition, stackTrace, type);
+
             string logType;
             switch (type)
             {

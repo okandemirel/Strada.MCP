@@ -37,7 +37,8 @@ import {
   AddComponentTool, RemoveComponentTool, GetComponentsTool,
   SetTransformTool, GetTransformTool, SetParentTool,
   PlayModeTool, GetPlayStateTool, ExecuteMenuTool,
-  ConsoleLogTool, ConsoleClearTool, SelectionGetTool, SelectionSetTool,
+  ConsoleLogTool, ConsoleClearTool, ConsoleReadTool, ConsoleAnalyzeTool,
+  SelectionGetTool, SelectionSetTool, BuildPipelineTool, PackageManageTool, EditorPreferencesTool,
 } from './tools/unity/index.js';
 import {
   SceneCreateTool, SceneOpenTool, SceneSaveTool, SceneInfoTool,
@@ -156,7 +157,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new ArchitectureValidateTool(),
     new FeatureScaffoldTool(),
 
-    // Unity tools (18)
+    // Unity tools (23)
     new CreateGameObjectTool(),
     new FindGameObjectsTool(),
     new ModifyGameObjectTool(),
@@ -173,8 +174,13 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new ExecuteMenuTool(),
     new ConsoleLogTool(),
     new ConsoleClearTool(),
+    new ConsoleReadTool(),
+    new ConsoleAnalyzeTool(),
     new SelectionGetTool(),
     new SelectionSetTool(),
+    new BuildPipelineTool(),
+    new PackageManageTool(),
+    new EditorPreferencesTool(),
 
     // Unity Scene tools (8)
     new SceneCreateTool(),

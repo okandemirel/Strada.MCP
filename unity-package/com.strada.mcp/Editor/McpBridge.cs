@@ -84,6 +84,7 @@ namespace Strada.Mcp.Editor
                 ComponentCommands.Register(Dispatcher);
                 TransformCommands.Register(Dispatcher);
                 EditorCommands.Register(Dispatcher);
+                ProjectCommands.Register(Dispatcher);
 
                 // Create event broadcaster
                 Broadcaster = new EventBroadcaster(Server);

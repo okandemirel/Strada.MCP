@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  ConsoleAnalyzeTool,
   ConsoleLogTool,
   ConsoleClearTool,
+  ConsoleReadTool,
   SelectionGetTool,
   SelectionSetTool,
 } from './editor-tools.js';
@@ -138,6 +140,75 @@ describe('ConsoleClearTool', () => {
   it('should format response on success', async () => {
     const result = await tool.execute({}, createContext());
     expect(result.content).toContain('Console cleared');
+  });
+});
+
+describe('ConsoleReadTool', () => {
+  let tool: ConsoleReadTool;
+  let bridge: BridgeClient;
+
+  beforeEach(() => {
+    tool = new ConsoleReadTool();
+    bridge = createMockBridge({
+      entries: [
+        { type: 'error', message: 'CS0246: Missing symbol', file: 'Assets/Test.cs', line: 12 },
+        { type: 'warning', message: 'Unused variable' },
+      ],
+      totalCount: 2,
+    });
+    tool.setBridgeClient(bridge);
+  });
+
+  it('should read console logs via bridge', async () => {
+    const result = await tool.execute({ limit: 25 }, createContext());
+    expect(result.isError).toBeFalsy();
+    expect(bridge.request).toHaveBeenCalledWith('editor.getConsoleLogs', {
+      includeStackTrace: true,
+      limit: 25,
+    });
+    expect(result.content).toContain('Unity console snapshot');
+    expect(result.content).toContain('CS0246');
+  });
+});
+
+describe('ConsoleAnalyzeTool', () => {
+  let tool: ConsoleAnalyzeTool;
+  let bridge: BridgeClient;
+
+  beforeEach(() => {
+    tool = new ConsoleAnalyzeTool();
+    bridge = createMockBridge({
+      entries: [
+        {
+          type: 'error',
+          message: 'CS0246: The type or namespace name Foo could not be found',
+          file: 'Assets/Foo.cs',
+          line: 4,
+          stackTrace: 'Assets/Foo.cs:4',
+        },
+        {
+          type: 'error',
+          message: 'CS0246: The type or namespace name Foo could not be found',
+          file: 'Assets/Foo.cs',
+          line: 4,
+          stackTrace: 'Assets/Foo.cs:4',
+        },
+      ],
+      totalCount: 2,
+    });
+    tool.setBridgeClient(bridge);
+  });
+
+  it('should group console issues', async () => {
+    const result = await tool.execute({ limit: 50 }, createContext());
+    expect(result.isError).toBeFalsy();
+    expect(bridge.request).toHaveBeenCalledWith('editor.getConsoleLogs', {
+      limit: 50,
+      types: undefined,
+      includeStackTrace: true,
+    });
+    expect(result.content).toContain('grouped issue');
+    expect(result.content).toContain('2x');
   });
 });
 
