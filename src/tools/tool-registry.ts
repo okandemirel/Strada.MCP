@@ -1,4 +1,6 @@
 import type { ITool, ToolCategory } from './tool.interface.js';
+import type { BridgeCapabilityManifestType } from '../bridge/capabilities.js';
+import { supportsBridgeFeature, supportsBridgeMethod } from '../bridge/capabilities.js';
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ITool>();
@@ -18,8 +20,29 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  getAvailable(bridgeConnected: boolean): ITool[] {
-    return this.getAll().filter((tool) => !tool.metadata.requiresBridge || bridgeConnected);
+  getAvailable(
+    bridgeConnected: boolean,
+    bridgeCapabilities?: BridgeCapabilityManifestType | null,
+  ): ITool[] {
+    return this.getAll().filter((tool) => {
+      if (!tool.metadata.requiresBridge) {
+        return true;
+      }
+
+      if (!bridgeConnected) {
+        return false;
+      }
+
+      if (!bridgeCapabilities) {
+        return true;
+      }
+
+      const requiredMethods = tool.metadata.requiredBridgeMethods ?? [];
+      const requiredCapabilities = tool.metadata.requiredBridgeCapabilities ?? [];
+
+      return requiredMethods.every((method) => supportsBridgeMethod(bridgeCapabilities, method))
+        && requiredCapabilities.every((feature) => supportsBridgeFeature(bridgeCapabilities, feature));
+    });
   }
 
   getByCategory(category: ToolCategory): ITool[] {

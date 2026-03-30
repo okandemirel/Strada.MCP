@@ -2,9 +2,12 @@ import { z } from 'zod';
 
 // --- JSON-RPC 2.0 Message Schemas ---
 
+export const JsonRpcId = z.union([z.number(), z.string()]);
+export type JsonRpcIdType = z.infer<typeof JsonRpcId>;
+
 export const JsonRpcRequest = z.object({
   jsonrpc: z.literal('2.0'),
-  id: z.union([z.number(), z.string()]),
+  id: JsonRpcId,
   method: z.string(),
   params: z.record(z.string(), z.unknown()).optional(),
 });
@@ -19,7 +22,7 @@ export type JsonRpcErrorType = z.infer<typeof JsonRpcError>;
 
 export const JsonRpcResponse = z.object({
   jsonrpc: z.literal('2.0'),
-  id: z.union([z.number(), z.string(), z.null()]),
+  id: JsonRpcId.nullable(),
   result: z.unknown().optional(),
   error: JsonRpcError.optional(),
 });
@@ -92,6 +95,14 @@ export type ParsedMessage =
   | { type: 'request'; message: JsonRpcRequestType }
   | { type: 'response'; message: JsonRpcResponseType }
   | { type: 'notification'; message: JsonRpcNotificationType };
+
+export function normalizeJsonRpcId(id: JsonRpcIdType | null | undefined): string | null {
+  if (id === null || id === undefined) {
+    return null;
+  }
+
+  return String(id);
+}
 
 export function parseJsonRpcMessage(raw: string): ParsedMessage {
   let parsed: unknown;

@@ -88,6 +88,7 @@ namespace Strada.Mcp.Editor
                 DiagnosticsCommands.Register(Dispatcher);
                 ProductivityCommands.Register(Dispatcher);
                 StradaCommands.Register(Dispatcher);
+                BridgeCapabilities.Register(Dispatcher);
 
                 // Create event broadcaster
                 Broadcaster = new EventBroadcaster(Server);

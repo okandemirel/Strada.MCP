@@ -13,6 +13,26 @@ async function createMockServer(): Promise<{
   let connectionResolve: ((socket: net.Socket) => void) | null = null;
   const server = net.createServer((socket) => {
     connections.push(socket);
+    socket.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(Boolean);
+      for (const line of lines) {
+        const request = JSON.parse(line);
+        if (request.method === 'bridge.getCapabilities') {
+          socket.write(JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              manifestVersion: 1,
+              bridgeVersion: '1.0.0',
+              protocolVersion: '2.0',
+              supportedMethods: [],
+              supportedFeatures: ['bridge.capability-manifest'],
+              metadata: { test: true },
+            },
+          }) + '\n');
+        }
+      }
+    });
     if (connectionResolve) {
       connectionResolve(socket);
       connectionResolve = null;
@@ -100,8 +120,63 @@ describe('BridgeManager', () => {
       logLevel: 'error',
     });
 
+    await manager.connect();
+
     expect(manager.client).toBeDefined();
     expect(manager.events).toBeDefined();
+    expect(manager.client.capabilities?.manifestVersion).toBe(1);
+  });
+
+  it('should connect to legacy bridges without capability discovery', async () => {
+    mockServer.server.removeAllListeners('connection');
+    mockServer.connections.length = 0;
+
+    let connectionResolve: ((socket: net.Socket) => void) | null = null;
+    mockServer.server.on('connection', (socket) => {
+      mockServer.connections.push(socket);
+      socket.on('data', (data) => {
+        const lines = data.toString().split('\n').filter(Boolean);
+        for (const line of lines) {
+          const request = JSON.parse(line);
+          if (request.method === 'bridge.getCapabilities') {
+            socket.write(JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              error: { code: -32601, message: 'Method not found: bridge.getCapabilities' },
+            }) + '\n');
+          }
+        }
+      });
+      if (connectionResolve) {
+        connectionResolve(socket);
+        connectionResolve = null;
+      }
+      socket.on('close', () => {
+        const idx = mockServer.connections.indexOf(socket);
+        if (idx >= 0) mockServer.connections.splice(idx, 1);
+      });
+    });
+
+    mockServer.waitForConnection = () =>
+      new Promise<net.Socket>((res) => {
+        if (mockServer.connections.length > 0) {
+          res(mockServer.connections[mockServer.connections.length - 1]);
+        } else {
+          connectionResolve = res;
+        }
+      });
+
+    manager = new BridgeManager({
+      port: mockServer.port,
+      autoConnect: false,
+      timeoutMs: 500,
+      logLevel: 'error',
+    });
+
+    await manager.connect();
+
+    expect(manager.isConnected).toBe(true);
+    expect(manager.client.capabilities).toBeNull();
   });
 
   it('should forward stateChange events', async () => {

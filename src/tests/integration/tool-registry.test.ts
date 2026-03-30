@@ -225,6 +225,12 @@ describe('Tool Registry Integration', () => {
       expect(typeof tool.metadata.requiresBridge).toBe('boolean');
       expect(typeof tool.metadata.dangerous).toBe('boolean');
       expect(typeof tool.metadata.readOnly).toBe('boolean');
+      if (tool.metadata.requiredBridgeMethods !== undefined) {
+        expect(Array.isArray(tool.metadata.requiredBridgeMethods)).toBe(true);
+      }
+      if (tool.metadata.requiredBridgeCapabilities !== undefined) {
+        expect(Array.isArray(tool.metadata.requiredBridgeCapabilities)).toBe(true);
+      }
     }
   });
 });

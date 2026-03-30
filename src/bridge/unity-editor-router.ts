@@ -155,6 +155,10 @@ export class UnityEditorRouter {
     };
   }
 
+  getBridgeClient(): BridgeClient | null {
+    return this.currentManager?.client ?? null;
+  }
+
   async retarget(request: UnityEditorRouteRequest = {}): Promise<UnityEditorRouteResult> {
     const resolution = resolveUnityEditorTarget({
       registryDir: this.options.registryDir,

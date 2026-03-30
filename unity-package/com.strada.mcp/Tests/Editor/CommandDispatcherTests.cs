@@ -176,6 +176,36 @@ namespace Strada.Mcp.Tests.Editor
         }
 
         [Test]
+        public void ProcessMessage_NumericRequestId_ReturnsStringResponseId()
+        {
+            _dispatcher.RegisterHandler("test.numeric", _ => new Dictionary<string, object> { { "ok", true } });
+
+            string raw = "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"test.numeric\"}";
+            string response = _dispatcher.ProcessMessage(raw);
+
+            Assert.That(response, Does.Contain("\"id\":\"42\""));
+            Assert.That(response, Does.Contain("\"result\""));
+        }
+
+        [Test]
+        public void BridgeCapabilitiesManifest_IncludesRegisteredMethodsAndFeatures()
+        {
+            _dispatcher.RegisterHandler("editor.compileStatus", _ => null);
+            _dispatcher.RegisterHandler("editor.getConsoleLogs", _ => null);
+            BridgeCapabilities.Register(_dispatcher);
+
+            var manifest = BridgeCapabilities.BuildManifest(_dispatcher);
+
+            Assert.AreEqual(1, manifest["manifestVersion"]);
+            Assert.AreEqual("1.0.0", manifest["bridgeVersion"]);
+            CollectionAssert.Contains((System.Collections.ICollection)manifest["supportedMethods"], "bridge.getCapabilities");
+            CollectionAssert.Contains((System.Collections.ICollection)manifest["supportedMethods"], "editor.compileStatus");
+            CollectionAssert.Contains((System.Collections.ICollection)manifest["supportedFeatures"], "bridge.capability-manifest");
+            CollectionAssert.Contains((System.Collections.ICollection)manifest["supportedFeatures"], "editor.compile-status");
+            CollectionAssert.Contains((System.Collections.ICollection)manifest["supportedFeatures"], "editor.console-logs");
+        }
+
+        [Test]
         public void Dispatch_NullParams_PassesEmptyDict()
         {
             Dictionary<string, object> receivedParams = null;

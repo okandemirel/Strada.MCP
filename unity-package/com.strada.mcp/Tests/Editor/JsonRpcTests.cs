@@ -174,6 +174,18 @@ namespace Strada.Mcp.Tests.Editor
         }
 
         [Test]
+        public void Deserialize_Request_NumericId_NormalizesToString()
+        {
+            string json = "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"editor.getPlayState\"}";
+
+            string type = JsonRpcSerializer.Deserialize(json, out var request, out _, out _);
+
+            Assert.AreEqual("request", type);
+            Assert.IsNotNull(request);
+            Assert.AreEqual("42", request.id);
+        }
+
+        [Test]
         public void Deserialize_Response_Success()
         {
             string json = "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"isPlaying\":false}}";

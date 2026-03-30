@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConsoleAnalyzeTool,
   ConsoleLogTool,
@@ -146,8 +149,9 @@ describe('ConsoleClearTool', () => {
 describe('ConsoleReadTool', () => {
   let tool: ConsoleReadTool;
   let bridge: BridgeClient;
+  let tempDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tool = new ConsoleReadTool();
     bridge = createMockBridge({
       entries: [
@@ -157,6 +161,12 @@ describe('ConsoleReadTool', () => {
       totalCount: 2,
     });
     tool.setBridgeClient(bridge);
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'strada-mcp-console-read-'));
+  });
+
+  afterEach(async () => {
+    delete process.env.UNITY_EDITOR_LOG_PATH;
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   it('should read console logs via bridge', async () => {
@@ -169,13 +179,36 @@ describe('ConsoleReadTool', () => {
     expect(result.content).toContain('Unity console snapshot');
     expect(result.content).toContain('CS0246');
   });
+
+  it('should fall back to editor log data when the bridge request fails', async () => {
+    const logPath = path.join(tempDir, 'Editor.log');
+    await fs.writeFile(
+      logPath,
+      [
+        'Assets/Test.cs(12,4): error CS0246: Missing symbol',
+        'Assets/Test.cs(14,2): warning CS0168: Variable is declared but never used',
+      ].join('\n'),
+      'utf8',
+    );
+    process.env.UNITY_EDITOR_LOG_PATH = logPath;
+
+    bridge = createMockBridge();
+    (bridge.request as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Connection lost'));
+    tool.setBridgeClient(bridge);
+
+    const result = await tool.execute({ limit: 10 }, createContext({ projectPath: tempDir }));
+    expect(result.content).toContain('Diagnostics source: static_editor_log');
+    expect(result.content).toContain('Live bridge fallback: Connection lost');
+    expect(result.content).toContain('Missing symbol');
+  });
 });
 
 describe('ConsoleAnalyzeTool', () => {
   let tool: ConsoleAnalyzeTool;
   let bridge: BridgeClient;
+  let tempDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tool = new ConsoleAnalyzeTool();
     bridge = createMockBridge({
       entries: [
@@ -197,6 +230,12 @@ describe('ConsoleAnalyzeTool', () => {
       totalCount: 2,
     });
     tool.setBridgeClient(bridge);
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'strada-mcp-console-analyze-'));
+  });
+
+  afterEach(async () => {
+    delete process.env.UNITY_EDITOR_LOG_PATH;
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   it('should group console issues', async () => {
@@ -208,6 +247,28 @@ describe('ConsoleAnalyzeTool', () => {
       includeStackTrace: true,
     });
     expect(result.content).toContain('grouped issue');
+    expect(result.content).toContain('2x');
+  });
+
+  it('should analyze fallback editor log entries when the live bridge is unavailable', async () => {
+    const logPath = path.join(tempDir, 'Editor.log');
+    await fs.writeFile(
+      logPath,
+      [
+        'Assets/Foo.cs(4,2): error CS0246: The type or namespace name Foo could not be found',
+        'Assets/Foo.cs(4,2): error CS0246: The type or namespace name Foo could not be found',
+      ].join('\n'),
+      'utf8',
+    );
+    process.env.UNITY_EDITOR_LOG_PATH = logPath;
+
+    bridge = createMockBridge();
+    (bridge.request as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Bridge offline'));
+    tool.setBridgeClient(bridge);
+
+    const result = await tool.execute({ limit: 20 }, createContext({ projectPath: tempDir }));
+    expect(result.content).toContain('Diagnostics source: static_editor_log');
+    expect(result.content).toContain('Live bridge fallback: Bridge offline');
     expect(result.content).toContain('2x');
   });
 });

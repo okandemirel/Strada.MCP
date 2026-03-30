@@ -3,6 +3,7 @@ import type { BridgeClient } from '../../bridge/bridge-client.js';
 import type { ITool, ToolContext, ToolMetadata, ToolResult } from '../tool.interface.js';
 import { zodToJsonSchema } from '../../utils/zod-to-json-schema.js';
 import { BridgeTool } from './bridge-tool.js';
+import { getStaticCompileStatus } from './local-diagnostics.js';
 
 const compileStatusSchema = z.object({});
 const compileWaitSchema = z.object({
@@ -122,6 +123,8 @@ abstract class CompositeBridgeTool implements ITool {
   protected abstract readonly readOnlyTool: boolean;
   protected readonly toolCategory = 'unity-runtime' as const;
   protected readonly dangerousTool = false;
+  protected readonly requiredBridgeMethods: readonly string[] = [];
+  protected readonly requiredBridgeCapabilities: readonly string[] = [];
 
   private bridgeClient: BridgeClient | null = null;
   private _inputSchema: Record<string, unknown> | null = null;
@@ -139,6 +142,8 @@ abstract class CompositeBridgeTool implements ITool {
       requiresBridge: true,
       dangerous: this.dangerousTool,
       readOnly: this.readOnlyTool,
+      requiredBridgeMethods: [...this.requiredBridgeMethods],
+      requiredBridgeCapabilities: [...this.requiredBridgeCapabilities],
     };
   }
 
@@ -184,6 +189,45 @@ export class CompileStatusTool extends SimpleJsonBridgeTool {
   protected readonly schema = compileStatusSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['editor.compile-status'];
+
+  override get metadata(): ToolMetadata {
+    return {
+      ...super.metadata,
+      requiresBridge: false,
+    };
+  }
+
+  override async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+    const start = performance.now();
+    const parsed = this.schema.parse(input);
+
+    try {
+      if (!context.unityBridgeConnected || !this.client) {
+        throw new Error('Unity bridge is not connected.');
+      }
+
+      const result = await this.client.request(this.rpcMethod, this.buildRequest(parsed));
+      return {
+        content: JSON.stringify({
+          source: 'live_bridge',
+          bridgeMethod: this.rpcMethod,
+          compile: result,
+        }, null, 2),
+        metadata: { executionTimeMs: Math.round(performance.now() - start) },
+      };
+    } catch (error) {
+      const fallback = await getStaticCompileStatus({
+        projectPath: context.projectPath,
+        bridgeError: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        content: JSON.stringify(fallback, null, 2),
+        isError: false,
+        metadata: { executionTimeMs: Math.round(performance.now() - start) },
+      };
+    }
+  }
 }
 
 export class CompileWaitTool extends CompositeBridgeTool {
@@ -191,6 +235,8 @@ export class CompileWaitTool extends CompositeBridgeTool {
   readonly description = 'Poll Unity compilation until scripts finish compiling or a timeout is reached';
   protected readonly schema = compileWaitSchema;
   protected readonly readOnlyTool = true;
+  protected override readonly requiredBridgeMethods = ['editor.compileStatus'];
+  protected override readonly requiredBridgeCapabilities = ['editor.compile-status'];
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const noBridge = await this.ensureBridge(context);
@@ -249,6 +295,7 @@ export class TestListTool extends SimpleJsonBridgeTool {
   protected readonly schema = testListSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['unity-test-framework'];
 }
 
 export class TestRunTool extends SimpleJsonBridgeTool {
@@ -258,6 +305,7 @@ export class TestRunTool extends SimpleJsonBridgeTool {
   protected readonly schema = testRunSchema;
   protected readonly readOnlyTool = false;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['unity-test-framework'];
 }
 
 export class TestResultsTool extends SimpleJsonBridgeTool {
@@ -267,6 +315,7 @@ export class TestResultsTool extends SimpleJsonBridgeTool {
   protected readonly schema = testResultsSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['unity-test-framework'];
 }
 
 export class TestRerunFailedTool extends CompositeBridgeTool {
@@ -274,6 +323,8 @@ export class TestRerunFailedTool extends CompositeBridgeTool {
   readonly description = 'Rerun only the failed tests from the latest Unity test run';
   protected readonly schema = testRerunFailedSchema;
   protected readonly readOnlyTool = false;
+  protected override readonly requiredBridgeMethods = ['editor.testResults', 'editor.testRun'];
+  protected override readonly requiredBridgeCapabilities = ['unity-test-framework'];
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const noBridge = await this.ensureBridge(context);
@@ -366,6 +417,7 @@ export class ProjectToolListTool extends SimpleJsonBridgeTool {
   protected readonly schema = projectToolListSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeCapabilities = ['unity-project-extensions'];
 }
 
 export class ProjectToolInvokeTool extends SimpleJsonBridgeTool {
@@ -375,6 +427,7 @@ export class ProjectToolInvokeTool extends SimpleJsonBridgeTool {
   protected readonly schema = projectToolInvokeSchema;
   protected readonly readOnlyTool = false;
   protected readonly dangerousTool = true;
+  protected override readonly requiredBridgeCapabilities = ['unity-project-extensions'];
 }
 
 export class VerifyChangeTool extends CompositeBridgeTool {
@@ -384,6 +437,15 @@ export class VerifyChangeTool extends CompositeBridgeTool {
   protected readonly schema = verifyChangeSchema;
   protected readonly readOnlyTool = true;
   protected readonly dangerousTool = false;
+  protected override readonly requiredBridgeMethods = [
+    'editor.recompile',
+    'editor.compileStatus',
+    'editor.getConsoleLogs',
+  ];
+  protected override readonly requiredBridgeCapabilities = [
+    'editor.compile-status',
+    'editor.console-logs',
+  ];
 
   protected override isReadAction(_input: Record<string, unknown>): boolean {
     return true;

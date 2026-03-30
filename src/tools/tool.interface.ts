@@ -34,6 +34,8 @@ export interface ToolMetadata {
   requiresBridge: boolean;
   dangerous: boolean;
   readOnly: boolean;
+  requiredBridgeMethods?: string[];
+  requiredBridgeCapabilities?: string[];
 }
 
 export interface ITool {

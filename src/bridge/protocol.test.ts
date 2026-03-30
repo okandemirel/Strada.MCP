@@ -5,6 +5,7 @@ import {
   JsonRpcNotification,
   JsonRpcError,
   parseJsonRpcMessage,
+  normalizeJsonRpcId,
   createRequest,
   createNotification,
   ErrorCode,
@@ -112,6 +113,14 @@ describe('JSON-RPC Protocol Types', () => {
 
     it('should throw on unrecognized message format', () => {
       expect(() => parseJsonRpcMessage('{"foo":"bar"}')).toThrow();
+    });
+  });
+
+  describe('normalizeJsonRpcId', () => {
+    it('should normalize numeric and string ids to the same key shape', () => {
+      expect(normalizeJsonRpcId(42)).toBe('42');
+      expect(normalizeJsonRpcId('42')).toBe('42');
+      expect(normalizeJsonRpcId(null)).toBeNull();
     });
   });
 
