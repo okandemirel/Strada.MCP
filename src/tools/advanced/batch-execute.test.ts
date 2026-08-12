@@ -184,4 +184,29 @@ describe('BatchExecuteTool', () => {
     expect(parsed.results[0]).toHaveProperty('durationMs');
     expect(typeof parsed.results[0].durationMs).toBe('number');
   });
+
+  it("reports isError when an operation fails", () => {
+    // The envelope used to omit isError entirely, so a batch whose operations
+    // all failed looked like a clean run to everything downstream — the
+    // orchestrator's consecutive-error tracking, error recovery, retry, and the
+    // tool-result log. Measured: a strada_create_module call rejected for a bad
+    // argument name went by unremarked and the task produced nothing.
+    return tool
+      .execute({ operations: [{ tool: 'tool_fail', input: {} }] }, ctx)
+      .then((result) => {
+        expect(result.isError).toBe(true);
+        const output = JSON.parse(result.content) as { failureCount: number };
+        expect(output.failureCount).toBe(1);
+      });
+  });
+
+  it("does not report isError when every operation succeeds", () => {
+    return tool
+      .execute({ operations: [{ tool: 'tool_a', input: {} }] }, ctx)
+      .then((result) => {
+        expect(result.isError).toBeUndefined();
+        const output = JSON.parse(result.content) as { failureCount: number };
+        expect(output.failureCount).toBe(0);
+      });
+  });
 });

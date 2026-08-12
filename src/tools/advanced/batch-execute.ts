@@ -167,6 +167,19 @@ export class BatchExecuteTool implements ITool {
       failureCount: results.filter((r) => !r.success).length,
     };
 
-    return { content: JSON.stringify(output, null, 2) };
+    // Surface inner failures on the ENVELOPE, not only inside the payload.
+    //
+    // This returned a bare `{ content }` — no isError — so a batch whose
+    // operations all failed still reported success to its caller. Everything
+    // downstream that keys off isError was blind to it: the orchestrator's
+    // consecutive-error tracking, error recovery, retry, and the tool-result
+    // log line all recorded a clean run. The model was left to notice a
+    // `"success": false` buried in a JSON blob, and in a measured run it did
+    // not — a strada_create_module call rejected for a bad argument name went
+    // by unremarked and the task produced nothing.
+    return {
+      content: JSON.stringify(output, null, 2),
+      ...(output.failureCount > 0 ? { isError: true } : {}),
+    };
   }
 }
