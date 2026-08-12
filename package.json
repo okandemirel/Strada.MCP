@@ -30,7 +30,7 @@
   "homepage": "https://github.com/okandemirel/Strada.MCP#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.10.0",
     "glob": "^13.0.6",
     "hnswlib-node": "^3.0.0",
     "tree-sitter": "^0.21.1",
