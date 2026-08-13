@@ -69,6 +69,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env['UNITY_EDITOR_LOG_PATH'];
   delete process.env['UNITY_EDITOR_PATH'];
+  delete process.env['UNITY_HUB_EDITOR_DIR'];
 });
 
 describe('offline compile status', () => {
@@ -111,6 +112,61 @@ describe('offline compile status', () => {
     expect(status.message).toMatch(/not treat this as a successful compile/i);
   });
 
+  it("compiles with headless Unity when there is no .NET SDK", async () => {
+    // The common case on a developer machine: `dotnet` is absent, so generating
+    // a .sln buys nothing. Unity compiles every script before it will run
+    // -executeMethod, so one batch invocation is a real compile signal.
+    const unity = join(projectPath, 'FakeUnity');
+    writeFileSync(unity, '#!/bin/sh\n');
+    process.env['UNITY_EDITOR_PATH'] = unity;
+    rmSync(editorLogPath, { force: true });
+
+    execFileMock.mockImplementation((file: string, args: string[], _opts: unknown, cb: Function) => {
+      if (file === unity) {
+        expect(args).toContain('-batchmode');
+        expect(args).toContain('-quit');
+        expect(args).toContain('-nographics');
+        cb(
+          Object.assign(new Error('exit 1'), {
+            code: 1,
+            stdout:
+              "Assets/Modules/PixelFlow/Domain/Board.cs(12,9): error CS0246: The type or namespace name 'Grid' could not be found\n",
+            stderr: '',
+          }),
+        );
+        return;
+      }
+      // No dotnet on this machine.
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+
+    const status = await getStaticCompileStatus({ projectPath });
+
+    expect(status.source).toBe('static_unity_batch');
+    expect(status.verified).toBe(true);
+    expect(status.compile.lastSucceeded).toBe(false);
+    expect(status.compile.compileIssueCount).toBeGreaterThan(0);
+  });
+
+  it("reports unknown when headless Unity produces no diagnostics at all", async () => {
+    // A licence failure or timeout yields an empty log. That is "unknown", and
+    // reporting it as a clean compile is the exact bug this file exists for.
+    const unity = join(projectPath, 'FakeUnity');
+    writeFileSync(unity, '#!/bin/sh\n');
+    process.env['UNITY_EDITOR_PATH'] = unity;
+    rmSync(editorLogPath, { force: true });
+
+    execFileMock.mockImplementation((_file: string, _args: string[], _opts: unknown, cb: Function) => {
+      cb(Object.assign(new Error('timeout'), { code: 1, stdout: '', stderr: '' }));
+    });
+
+    const status = await getStaticCompileStatus({ projectPath });
+
+    expect(status.source).toBe('unavailable');
+    expect(status.verified).toBe(false);
+    expect(status.compile.compileIssueCount).toBeNull();
+  });
+
   it("generates a missing solution with headless Unity, then builds it", async () => {
     // The whole point of the third fix: a project that has never been opened in
     // the editor can still be compiled.
@@ -144,19 +200,44 @@ describe('offline compile status', () => {
     expect(status.compile.lastSucceeded).toBe(true);
   });
 
-  it("does not open the project with a mismatched editor version", async () => {
-    // Opening a Unity project with a newer editor upgrades it in place. A
-    // diagnostic must never cause that, so with no resolvable editor it stops.
-    rmSync(editorLogPath, { force: true });
+  it("uses an installed editor even when it is not the pinned version", async () => {
+    // Forcing an exact version match means never verifying anything on a normal
+    // machine: measured here, the project pinned 6000.0.30f1 while 6000.3.22f1
+    // and 6000.5.7f1 were installed. Working with what the user has is the
+    // point; the mismatch is reported, not used as a reason to refuse.
+    const hub = join(projectPath, 'Hub');
+    for (const version of ['6000.3.22f1', '6000.5.7f1']) {
+      mkdirSync(join(hub, version, 'Unity.app/Contents/MacOS'), { recursive: true });
+      writeFileSync(join(hub, version, 'Unity.app/Contents/MacOS/Unity'), '#!/bin/sh\n');
+    }
     writeFileSync(
       join(projectPath, 'ProjectSettings', 'ProjectVersion.txt'),
-      'm_EditorVersion: 2019.4.0f1\n',
+      'm_EditorVersion: 6000.0.30f1\n',
     );
+    rmSync(editorLogPath, { force: true });
     delete process.env['UNITY_EDITOR_PATH'];
+    process.env['UNITY_HUB_EDITOR_DIR'] = hub;
+
+    execFileMock.mockImplementation((file: string, _args: string[], _o: unknown, cb: Function) => {
+      if (String(file).includes('Unity')) {
+        cb(Object.assign(new Error('exit 1'), {
+          code: 1,
+          stdout: "Assets/Board.cs(3,1): error CS1002: ; expected\n",
+          stderr: '',
+        }));
+        return;
+      }
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
 
     const status = await getStaticCompileStatus({ projectPath });
 
-    expect(status.source).toBe('unavailable');
-    expect(execFileMock.mock.calls.some((c) => String(c[0]).includes('Unity'))).toBe(false);
+    expect(status.source).toBe('static_unity_batch');
+    expect(status.verified).toBe(true);
+    // The closest editor that can open the project, not the pinned one…
+    expect(status.diagnostics?.['editorVersion']).toBe('6000.3.22f1');
+    expect(status.diagnostics?.['projectVersion']).toBe('6000.0.30f1');
+    // …and the user is told, because a newer editor upgrades the project.
+    expect(String(status.diagnostics?.['editorVersionMismatch'])).toMatch(/upgrades it in place/);
   });
 });

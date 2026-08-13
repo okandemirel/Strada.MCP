@@ -11,7 +11,12 @@ const LOG_HEADER_BYTES = 16 * 1024;
 /** Unity batch-mode startup can include a licence round-trip; be generous. */
 const UNITY_BATCH_TIMEOUT_MS = 300_000;
 
-export type DiagnosticsSource = 'live_bridge' | 'static_editor_log' | 'static_dotnet_build' | 'unavailable';
+export type DiagnosticsSource =
+  | 'live_bridge'
+  | 'static_editor_log'
+  | 'static_unity_batch'
+  | 'static_dotnet_build'
+  | 'unavailable';
 
 export interface ConsoleLogEntry {
   type?: string;
@@ -151,6 +156,7 @@ export async function getStaticCompileStatus(
     return {
       source: 'static_dotnet_build',
       bridgeMethod: 'editor.compileStatus',
+      verified: true,
       compile: {
         isCompiling: false,
         isReloading: false,
@@ -169,6 +175,47 @@ export async function getStaticCompileStatus(
         errorCount,
         warningCount,
         entries: dotnetSnapshot.entries.slice(0, 20),
+      },
+    };
+  }
+
+  // No .NET SDK on this machine? Unity can still compile the project itself.
+  const batchSnapshot = await tryUnityBatchCompile(options.projectPath);
+  if (batchSnapshot) {
+    const errorCount = batchSnapshot.entries.filter((entry) => isErrorType(entry.type)).length;
+    const warningCount = batchSnapshot.entries.filter(
+      (entry) => String(entry.type).toLowerCase() === 'warning',
+    ).length;
+    return {
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: {
+        isCompiling: false,
+        isReloading: false,
+        lastStartedAt: null,
+        lastFinishedAt: batchSnapshot.capturedAt,
+        lastSucceeded: batchSnapshot.succeeded,
+        compileIssueCount: batchSnapshot.totalCount,
+        assemblyReloadCount: 0,
+      },
+      capturedAt: batchSnapshot.capturedAt,
+      bridgeError: options.bridgeError,
+      diagnostics: {
+        command: batchSnapshot.command.join(' '),
+        exitCode: batchSnapshot.exitCode,
+        errorCount,
+        warningCount,
+        editorVersion: batchSnapshot.editor.version,
+        projectVersion: batchSnapshot.editor.projectVersion,
+        ...(batchSnapshot.editor.exactMatch
+          ? {}
+          : {
+              editorVersionMismatch:
+                'Compiled with an editor that does not match ProjectVersion.txt; ' +
+                'opening a project with a newer Unity upgrades it in place.',
+            }),
+        entries: batchSnapshot.entries.slice(0, 20),
       },
     };
   }
@@ -223,9 +270,10 @@ export async function getStaticCompileStatus(
     bridgeMethod: 'editor.compileStatus',
     verified: false,
     message:
-      'Compile status is UNKNOWN — nothing verified this project. No Unity bridge, ' +
-      'no .sln for an offline `dotnet build`, and no Editor.log belonging to this project. ' +
-      'Do not treat this as a successful compile.',
+      'Compile status is UNKNOWN — nothing verified this project. No Unity bridge; ' +
+      'no Unity editor installed for a headless compile; ' +
+      'no .NET SDK or .sln for an offline `dotnet build`; and no Editor.log belonging to ' +
+      'this project. Do not treat this as a successful compile.',
     compile: {
       isCompiling: false,
       isReloading: false,
@@ -401,6 +449,90 @@ async function findUnityEditorLogPath(): Promise<string | null> {
   return null;
 }
 
+interface UnityBatchSnapshot {
+  entries: ConsoleLogEntry[];
+  totalCount: number;
+  capturedAt: number;
+  exitCode: number;
+  succeeded: boolean;
+  command: string[];
+  editor: ResolvedUnityEditor;
+}
+
+/**
+ * Compile the project with Unity itself, headless.
+ *
+ * This is the only real compile signal on a machine without the .NET SDK, and
+ * that is the common case: measured on this one, `dotnet` is not installed at
+ * all, so generating a .sln bought nothing and the run ended with the agent
+ * asking a human whether to proceed unverified.
+ *
+ * Unity compiles every script before it will run `-executeMethod`, so one batch
+ * invocation yields both the compiler diagnostics and, as a side effect, the
+ * .sln that makes later `dotnet build` runs cheap. Errors are reported in the
+ * log whether or not the method itself runs.
+ *
+ * Slow — tens of seconds to minutes, plus a possible licence round-trip — so
+ * callers should prefer `dotnet build` when a solution already exists.
+ */
+async function tryUnityBatchCompile(projectPath: string): Promise<UnityBatchSnapshot | null> {
+  const editor = await findUnityEditor(projectPath);
+  if (!editor) return null;
+
+  const command = [
+    editor.binary,
+    '-batchmode',
+    '-quit',
+    '-nographics',
+    '-projectPath',
+    projectPath,
+    '-executeMethod',
+    'UnityEditor.SyncVS.SyncSolution',
+    '-logFile',
+    '-',
+  ];
+  const capturedAt = Date.now();
+
+  let stdout = '';
+  let stderr = '';
+  let exitCode = 0;
+  try {
+    const result = await execFile(command[0]!, command.slice(1), {
+      cwd: projectPath,
+      timeout: UNITY_BATCH_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } catch (error) {
+    // A compile failure exits non-zero WITH the diagnostics on stdout, so the
+    // error path is the interesting one, not a reason to give up.
+    stdout = typeof error === 'object' && error && 'stdout' in error ? String(error.stdout ?? '') : '';
+    stderr = typeof error === 'object' && error && 'stderr' in error ? String(error.stderr ?? '') : '';
+    exitCode =
+      typeof error === 'object' && error && 'code' in error && typeof error.code === 'number'
+        ? error.code
+        : 1;
+    // A timeout or a missing licence produces no diagnostics at all; that is
+    // "unknown", not "clean", so refuse to answer rather than report zero.
+    if (!stdout && !stderr) return null;
+  }
+
+  const lines = `${stdout}\n${stderr}`.split(/\r?\n/);
+  const entries = parseConsoleEntries(lines, false).filter((entry) => isCompileRelatedEntry(entry));
+  const errorCount = entries.filter((entry) => isErrorType(entry.type)).length;
+
+  return {
+    entries,
+    totalCount: entries.length,
+    capturedAt,
+    exitCode,
+    succeeded: exitCode === 0 && errorCount === 0,
+    command,
+    editor,
+  };
+}
+
 /**
  * Ask Unity to regenerate the IDE solution, headless.
  *
@@ -419,12 +551,12 @@ async function findUnityEditorLogPath(): Promise<string | null> {
  * ordinary, and none of them should fail the diagnostic.
  */
 async function trySyncSolutionHeadless(projectPath: string): Promise<string | null> {
-  const editor = await findUnityEditorBinary(projectPath);
+  const editor = await findUnityEditor(projectPath);
   if (!editor) return null;
 
   try {
     await execFile(
-      editor,
+      editor.binary,
       [
         '-batchmode',
         '-quit',
@@ -447,47 +579,135 @@ async function trySyncSolutionHeadless(projectPath: string): Promise<string | nu
 }
 
 /**
- * Locate a Unity editor binary for this project.
- *
- * Prefers the exact version in ProjectSettings/ProjectVersion.txt, because
- * opening a project with a newer editor silently upgrades it — a destructive
- * side effect no diagnostic should cause.
+ * Which Unity editor was used, and whether it matches the project.
  */
-async function findUnityEditorBinary(projectPath: string): Promise<string | null> {
+export interface ResolvedUnityEditor {
+  binary: string;
+  version: string | null;
+  projectVersion: string | null;
+  exactMatch: boolean;
+}
+
+/**
+ * Locate a Unity editor able to open this project, preferring an exact match.
+ *
+ * Deliberately does NOT insist on the exact version. A developer machine
+ * routinely holds a couple of editors and not the precise patch a project
+ * pins — measured here: the project asked for 6000.0.30f1 while 6000.3.22f1 and
+ * 6000.5.7f1 were installed. Refusing on that basis means never verifying
+ * anything, which is how a run ended with the agent asking a human whether to
+ * proceed unverified. Working with what is installed is the point.
+ *
+ * Ordering: the exact version, then the closest NEWER build (Unity opens older
+ * projects and upgrades them; the reverse simply fails), then the newest
+ * available as a last resort. The choice is reported so the caller can say
+ * which editor produced the verdict — a newer editor rewrites
+ * ProjectSettings/ProjectVersion.txt, and the user should learn that from the
+ * diagnostic rather than discover it later.
+ */
+async function findUnityEditor(projectPath: string): Promise<ResolvedUnityEditor | null> {
+  const projectVersion = await readProjectVersion(projectPath);
+
   const configured = process.env.UNITY_EDITOR_PATH?.trim();
   if (configured) {
     try {
       await access(configured);
-      return configured;
+      return { binary: configured, version: null, projectVersion, exactMatch: false };
     } catch {
       return null;
     }
   }
 
-  let version: string | null = null;
-  try {
-    const raw = await readFile(path.join(projectPath, 'ProjectSettings', 'ProjectVersion.txt'), 'utf8');
-    version = /m_EditorVersion:\s*(\S+)/.exec(raw)?.[1] ?? null;
-  } catch {
-    version = null;
-  }
-  if (!version) return null;
+  const installed = await listInstalledUnityEditors();
+  if (installed.length === 0) return null;
 
-  const candidates = [
-    path.join('/Applications/Unity/Hub/Editor', version, 'Unity.app/Contents/MacOS/Unity'),
-    path.join(os.homedir(), 'Applications/Unity/Hub/Editor', version, 'Unity.app/Contents/MacOS/Unity'),
-    `C:\\Program Files\\Unity\\Hub\\Editor\\${version}\\Editor\\Unity.exe`,
-    path.join(os.homedir(), 'Unity/Hub/Editor', version, 'Editor/Unity'),
+  const exact = projectVersion
+    ? installed.find((candidate) => candidate.version === projectVersion)
+    : undefined;
+  if (exact) {
+    return { binary: exact.binary, version: exact.version, projectVersion, exactMatch: true };
+  }
+
+  const ordered = [...installed].sort((a, b) => compareUnityVersions(a.version, b.version));
+  const newerThanProject = projectVersion
+    ? ordered.find((candidate) => compareUnityVersions(candidate.version, projectVersion) >= 0)
+    : undefined;
+  const chosen = newerThanProject ?? ordered[ordered.length - 1]!;
+
+  return { binary: chosen.binary, version: chosen.version, projectVersion, exactMatch: false };
+}
+
+async function readProjectVersion(projectPath: string): Promise<string | null> {
+  try {
+    const raw = await readFile(
+      path.join(projectPath, 'ProjectSettings', 'ProjectVersion.txt'),
+      'utf8',
+    );
+    return /m_EditorVersion:\s*(\S+)/.exec(raw)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+interface InstalledEditor {
+  version: string;
+  binary: string;
+}
+
+/** Every editor under the known Unity Hub roots, whatever their versions. */
+async function listInstalledUnityEditors(): Promise<InstalledEditor[]> {
+  const configuredRoot = process.env.UNITY_HUB_EDITOR_DIR?.trim();
+  const roots = [
+    // Honour a custom Hub location before the defaults: plenty of installs do
+    // not live where the installer puts them, and a missing editor here costs
+    // the user every compile check.
+    ...(configuredRoot
+      ? [
+          { dir: configuredRoot, rel: 'Unity.app/Contents/MacOS/Unity' },
+          { dir: configuredRoot, rel: 'Editor/Unity' },
+          { dir: configuredRoot, rel: 'Editor\\Unity.exe' },
+        ]
+      : []),
+    { dir: '/Applications/Unity/Hub/Editor', rel: 'Unity.app/Contents/MacOS/Unity' },
+    { dir: path.join(os.homedir(), 'Applications/Unity/Hub/Editor'), rel: 'Unity.app/Contents/MacOS/Unity' },
+    { dir: 'C:\\Program Files\\Unity\\Hub\\Editor', rel: 'Editor\\Unity.exe' },
+    { dir: path.join(os.homedir(), 'Unity/Hub/Editor'), rel: 'Editor/Unity' },
   ];
-  for (const candidate of candidates) {
+
+  const found: InstalledEditor[] = [];
+  for (const root of roots) {
+    let versions: string[];
     try {
-      await access(candidate);
-      return candidate;
+      versions = (await readdir(root.dir, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
     } catch {
       continue;
     }
+    for (const version of versions) {
+      const binary = path.join(root.dir, version, root.rel);
+      try {
+        await access(binary);
+        found.push({ version, binary });
+      } catch {
+        continue;
+      }
+    }
   }
-  return null;
+  return found;
+}
+
+/** Unity versions sort numerically by segment: 6000.3.22f1 < 6000.5.7f1. */
+function compareUnityVersions(left: string, right: string): number {
+  const parse = (value: string): number[] =>
+    (value.match(/\d+/g) ?? []).map((part) => Number.parseInt(part, 10));
+  const a = parse(left);
+  const b = parse(right);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] ?? 0) - (b[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 async function findSolutionPath(projectPath: string): Promise<string | null> {
