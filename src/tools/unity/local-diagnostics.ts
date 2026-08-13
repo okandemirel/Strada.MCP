@@ -1,13 +1,17 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { access, open, readdir, stat } from 'node:fs/promises';
+import { access, open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCallback);
 const DEFAULT_TAIL_BYTES = 512 * 1024;
+/** Enough of the log head to reach the COMMAND LINE ARGUMENTS block. */
+const LOG_HEADER_BYTES = 16 * 1024;
+/** Unity batch-mode startup can include a licence round-trip; be generous. */
+const UNITY_BATCH_TIMEOUT_MS = 300_000;
 
-export type DiagnosticsSource = 'live_bridge' | 'static_editor_log' | 'static_dotnet_build';
+export type DiagnosticsSource = 'live_bridge' | 'static_editor_log' | 'static_dotnet_build' | 'unavailable';
 
 export interface ConsoleLogEntry {
   type?: string;
@@ -34,13 +38,22 @@ export interface ConsoleSnapshotPayload {
 export interface CompileStatusPayload {
   source: DiagnosticsSource;
   bridgeMethod: 'editor.compileStatus';
+  /**
+   * False when nothing actually verified the project. Present so a caller does
+   * not have to infer "unknown" from a zero issue count, which is what an agent
+   * previously read as a clean compile.
+   */
+  verified?: boolean;
+  /** Human-readable reason, set alongside `verified: false`. */
+  message?: string;
   compile: {
     isCompiling: boolean;
     isReloading: boolean;
     lastStartedAt: number | null;
     lastFinishedAt: number | null;
     lastSucceeded: boolean | null;
-    compileIssueCount: number;
+    /** null when unknown — distinct from 0, which means "verified, none found". */
+    compileIssueCount: number | null;
     assemblyReloadCount: number;
   };
   capturedAt: number;
@@ -199,16 +212,27 @@ export async function getStaticCompileStatus(
     }
   }
 
+  // Nothing could verify anything. Say so in the shape the caller reads first.
+  //
+  // This used to answer `source: 'static_editor_log'` with `compileIssueCount:
+  // 0` and `lastSucceeded: null`, which reads as a clean compile — the zero is
+  // "no data", not "no errors". Measured: an agent took exactly that payload as
+  // a green signal on a project that had never been compiled at all.
   return {
-    source: 'static_editor_log',
+    source: 'unavailable',
     bridgeMethod: 'editor.compileStatus',
+    verified: false,
+    message:
+      'Compile status is UNKNOWN — nothing verified this project. No Unity bridge, ' +
+      'no .sln for an offline `dotnet build`, and no Editor.log belonging to this project. ' +
+      'Do not treat this as a successful compile.',
     compile: {
       isCompiling: false,
       isReloading: false,
       lastStartedAt: null,
-      lastFinishedAt: Date.now(),
+      lastFinishedAt: null,
       lastSucceeded: null,
-      compileIssueCount: 0,
+      compileIssueCount: null,
       assemblyReloadCount: 0,
     },
     capturedAt: Date.now(),
@@ -219,11 +243,68 @@ export async function getStaticCompileStatus(
   };
 }
 
+/**
+ * The project a Unity Editor.log belongs to, from its command-line header.
+ *
+ * Unity keeps ONE Editor.log per install, overwritten by whichever project was
+ * opened last. Reading it without this check reports another project's compile
+ * state as if it were this one's: measured, a Pixel Flow task was told
+ * `compileIssueCount: 0` from a log whose header read `-projectpath
+ * /Users/okan/Documents/Soak Games/Enhanced Package Manager`.
+ *
+ * The argument sits in the header, so this reads the head of the file, not the
+ * tail the diagnostics parser uses.
+ */
+async function readEditorLogProjectPath(editorLogPath: string): Promise<string | null> {
+  try {
+    const handle = await open(editorLogPath, 'r');
+    try {
+      const buffer = Buffer.alloc(LOG_HEADER_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, LOG_HEADER_BYTES, 0);
+      const lines = buffer.subarray(0, bytesRead).toString('utf8').split(/\r?\n/);
+      const flagIndex = lines.findIndex((line) => /^-projectpath$/i.test(line.trim()));
+      if (flagIndex >= 0 && lines[flagIndex + 1]) {
+        return lines[flagIndex + 1]!.trim() || null;
+      }
+      // Some Unity versions emit `-projectPath <value>` on one line.
+      for (const line of lines) {
+        const inline = /^-projectpath\s+(.+)$/i.exec(line.trim());
+        if (inline?.[1]) return inline[1].trim();
+      }
+      return null;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** Same directory, tolerating trailing slashes and symlinked temp roots. */
+async function isSameProject(a: string, b: string): Promise<boolean> {
+  const normalize = async (value: string): Promise<string> => {
+    const trimmed = path.resolve(value.replace(/[/\\]+$/, ''));
+    try {
+      return await realpath(trimmed);
+    } catch {
+      return trimmed;
+    }
+  };
+  return (await normalize(a)) === (await normalize(b));
+}
+
 async function tryReadEditorLogSnapshot(
   options: StaticConsoleOptions,
 ): Promise<ParsedLogSnapshot | null> {
   const editorLogPath = await findUnityEditorLogPath();
   if (!editorLogPath) {
+    return null;
+  }
+
+  // Refuse a log that belongs to a different project rather than reporting its
+  // state as this project's.
+  const logProject = await readEditorLogProjectPath(editorLogPath);
+  if (logProject && !(await isSameProject(logProject, options.projectPath))) {
     return null;
   }
 
@@ -250,7 +331,8 @@ async function tryRunDotnetBuild(
   projectPath: string,
   limit: number,
 ): Promise<DotnetBuildSnapshot | null> {
-  const solutionPath = await findSolutionPath(projectPath);
+  const solutionPath =
+    (await findSolutionPath(projectPath)) ?? (await trySyncSolutionHeadless(projectPath));
   if (!solutionPath) {
     return null;
   }
@@ -316,6 +398,95 @@ async function findUnityEditorLogPath(): Promise<string | null> {
     }
   }
 
+  return null;
+}
+
+/**
+ * Ask Unity to regenerate the IDE solution, headless.
+ *
+ * The offline compile path (`dotnet build`) needs a .sln, and Unity only writes
+ * one when a project is opened in the editor. A project an agent just created
+ * therefore had no .sln, `tryRunDotnetBuild` returned null, and the only
+ * remaining source was a stale Editor.log — so nothing ever compiled the code
+ * the agent wrote.
+ *
+ * `-batchmode -quit -nographics` needs no display and no human. It is slow
+ * (tens of seconds, sometimes a licence round-trip), so it runs ONLY when a
+ * solution is missing; once written, later builds reuse it.
+ *
+ * Returns the solution path, or null with the reason left to the caller — a
+ * missing editor, an unlicensed machine, or a CI box without Unity are all
+ * ordinary, and none of them should fail the diagnostic.
+ */
+async function trySyncSolutionHeadless(projectPath: string): Promise<string | null> {
+  const editor = await findUnityEditorBinary(projectPath);
+  if (!editor) return null;
+
+  try {
+    await execFile(
+      editor,
+      [
+        '-batchmode',
+        '-quit',
+        '-nographics',
+        '-projectPath',
+        projectPath,
+        '-executeMethod',
+        'UnityEditor.SyncVS.SyncSolution',
+        '-logFile',
+        '-',
+      ],
+      { cwd: projectPath, timeout: UNITY_BATCH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+    );
+  } catch {
+    // A non-zero exit still often leaves a usable solution behind, so fall
+    // through and look rather than trusting the exit code.
+  }
+
+  return findSolutionPath(projectPath);
+}
+
+/**
+ * Locate a Unity editor binary for this project.
+ *
+ * Prefers the exact version in ProjectSettings/ProjectVersion.txt, because
+ * opening a project with a newer editor silently upgrades it — a destructive
+ * side effect no diagnostic should cause.
+ */
+async function findUnityEditorBinary(projectPath: string): Promise<string | null> {
+  const configured = process.env.UNITY_EDITOR_PATH?.trim();
+  if (configured) {
+    try {
+      await access(configured);
+      return configured;
+    } catch {
+      return null;
+    }
+  }
+
+  let version: string | null = null;
+  try {
+    const raw = await readFile(path.join(projectPath, 'ProjectSettings', 'ProjectVersion.txt'), 'utf8');
+    version = /m_EditorVersion:\s*(\S+)/.exec(raw)?.[1] ?? null;
+  } catch {
+    version = null;
+  }
+  if (!version) return null;
+
+  const candidates = [
+    path.join('/Applications/Unity/Hub/Editor', version, 'Unity.app/Contents/MacOS/Unity'),
+    path.join(os.homedir(), 'Applications/Unity/Hub/Editor', version, 'Unity.app/Contents/MacOS/Unity'),
+    `C:\\Program Files\\Unity\\Hub\\Editor\\${version}\\Editor\\Unity.exe`,
+    path.join(os.homedir(), 'Unity/Hub/Editor', version, 'Editor/Unity'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
   return null;
 }
 
