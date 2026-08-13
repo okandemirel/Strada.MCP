@@ -285,12 +285,18 @@ export async function getStaticCompileStatus(
     source: 'unavailable',
     bridgeMethod: 'editor.compileStatus',
     verified: false,
-    message:
-      'Compile status is UNKNOWN — nothing verified this project. No Unity bridge; ' +
-      'no Unity editor installed for a headless compile; ' +
-      'no .NET SDK or .sln for an offline `dotnet build`; and no Editor.log belonging to ' +
-      'this project. Do not treat this as a successful compile. Run a verification ' +
-      'that permits a headless Unity compile to get a real answer.',
+    message: options.allowHeadlessCompile
+      ? 'Compile status is UNKNOWN — nothing could verify this project. No Unity bridge; ' +
+        'no usable Unity editor for a headless compile; no .NET SDK or .sln for an offline ' +
+        '`dotnet build`; and no Editor.log belonging to this project. Do not treat this as a ' +
+        'successful compile.'
+      : // The passive path declined to launch Unity; saying "no editor" here would
+        // be false on a machine that has one, and would talk the caller out of the
+        // very tool that can answer.
+        'Compile status is UNKNOWN — this is a passive status poll and it does not compile ' +
+        'anything. No Unity bridge is connected and no Editor.log belongs to this project. ' +
+        'Do not treat this as a successful compile: run `unity_verify_change`, which compiles ' +
+        'the project headlessly and returns a real verdict.',
     compile: {
       isCompiling: false,
       isReloading: false,

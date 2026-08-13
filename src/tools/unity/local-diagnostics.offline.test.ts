@@ -261,6 +261,9 @@ describe('offline compile status', () => {
     expect(execFileMock.mock.calls.some((c) => String(c[0]).includes('Unity'))).toBe(false);
     expect(status.source).toBe('unavailable');
     // …and it says how to get a real answer instead of leaving a dead end.
-    expect(status.message).toMatch(/headless Unity compile/i);
+    expect(status.message).toMatch(/unity_verify_change/);
+    // Must not claim the machine lacks an editor when it has one — that would
+    // talk the caller out of the tool that can actually answer.
+    expect(status.message).not.toMatch(/no usable Unity editor|not installed/i);
   });
 });
