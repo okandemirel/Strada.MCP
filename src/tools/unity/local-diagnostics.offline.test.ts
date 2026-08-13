@@ -140,7 +140,7 @@ describe('offline compile status', () => {
       cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     });
 
-    const status = await getStaticCompileStatus({ projectPath });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
 
     expect(status.source).toBe('static_unity_batch');
     expect(status.verified).toBe(true);
@@ -160,7 +160,7 @@ describe('offline compile status', () => {
       cb(Object.assign(new Error('timeout'), { code: 1, stdout: '', stderr: '' }));
     });
 
-    const status = await getStaticCompileStatus({ projectPath });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
 
     expect(status.source).toBe('unavailable');
     expect(status.verified).toBe(false);
@@ -193,7 +193,7 @@ describe('offline compile status', () => {
       cb(null, { stdout: 'Build succeeded.\n', stderr: '' });
     });
 
-    const status = await getStaticCompileStatus({ projectPath });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
 
     expect(execFileMock.mock.calls.some((c) => c[0] === unity)).toBe(true);
     expect(status.source).toBe('static_dotnet_build');
@@ -230,7 +230,7 @@ describe('offline compile status', () => {
       cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     });
 
-    const status = await getStaticCompileStatus({ projectPath });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
 
     expect(status.source).toBe('static_unity_batch');
     expect(status.verified).toBe(true);
@@ -239,5 +239,28 @@ describe('offline compile status', () => {
     expect(status.diagnostics?.['projectVersion']).toBe('6000.0.30f1');
     // …and the user is told, because a newer editor upgrades the project.
     expect(String(status.diagnostics?.['editorVersionMismatch'])).toMatch(/upgrades it in place/);
+  });
+
+  it("never launches Unity for a passive status poll", async () => {
+    // A status query must stay cheap and side-effect free. Launching the editor
+    // takes minutes, may need a licence, and upgrades the project in place when
+    // the installed version is newer — none of which a poll should cause.
+    const hub = join(projectPath, 'Hub');
+    mkdirSync(join(hub, '6000.5.7f1/Unity.app/Contents/MacOS'), { recursive: true });
+    writeFileSync(join(hub, '6000.5.7f1/Unity.app/Contents/MacOS/Unity'), '#!/bin/sh\n');
+    process.env['UNITY_HUB_EDITOR_DIR'] = hub;
+    delete process.env['UNITY_EDITOR_PATH'];
+    rmSync(editorLogPath, { force: true });
+    // No dotnet either, so the only thing that COULD answer is a Unity launch.
+    execFileMock.mockImplementation((_f: string, _a: string[], _o: unknown, cb: Function) => {
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+
+    const status = await getStaticCompileStatus({ projectPath });
+
+    expect(execFileMock.mock.calls.some((c) => String(c[0]).includes('Unity'))).toBe(false);
+    expect(status.source).toBe('unavailable');
+    // …and it says how to get a real answer instead of leaving a dead end.
+    expect(status.message).toMatch(/headless Unity compile/i);
   });
 });

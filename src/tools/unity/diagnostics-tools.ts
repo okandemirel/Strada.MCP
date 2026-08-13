@@ -453,7 +453,23 @@ export class VerifyChangeTool extends CompositeBridgeTool {
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const noBridge = await this.ensureBridge(context);
-    if (noBridge) return noBridge;
+    if (noBridge) {
+      // "Verify my change" used to give up here, which left an agent with no way
+      // to check its own work whenever the editor was closed — measured, a run
+      // ended by asking a human whether to proceed unverified. Compiling
+      // headlessly is slow and can upgrade the project, so it is opt-in
+      // everywhere else; this is the one caller whose entire purpose is to get a
+      // real answer, so it opts in.
+      const offline = await getStaticCompileStatus({
+        projectPath: context.projectPath,
+        bridgeError: 'Unity bridge not connected',
+        allowHeadlessCompile: true,
+      });
+      return {
+        content: JSON.stringify({ mode: 'offline', compile: offline }, null, 2),
+        isError: offline.compile.lastSucceeded === false,
+      };
+    }
 
     const parsed = this.schema.parse(input);
     const evidence: Record<string, unknown> = {};

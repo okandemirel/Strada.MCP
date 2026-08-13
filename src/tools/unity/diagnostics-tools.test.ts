@@ -186,4 +186,19 @@ describe('VerifyChangeTool', () => {
     expect(result.isError).toBeFalsy();
     expect(result.content).toContain('"status": "passed"');
   });
+
+  it('verifies offline when the editor is closed', async () => {
+    // "Verify my change" used to give up the moment no bridge was connected,
+    // leaving an agent with no way to check its own work. Measured: a run ended
+    // by telling the user it could not satisfy its own verification gate and
+    // asking whether to proceed anyway. With the editor closed it must still
+    // reach for a real compile rather than answering "cannot".
+    const tool = new VerifyChangeTool();
+
+    const result = await tool.execute({}, createContext({ unityBridgeConnected: false }));
+
+    expect(result.content).toContain('"mode": "offline"');
+    // Whatever the verdict, it must be an honest one — never a bare refusal.
+    expect(result.content).toMatch(/"source":/);
+  });
 });

@@ -77,6 +77,16 @@ interface StaticConsoleOptions {
 }
 
 interface StaticCompileOptions {
+  /**
+   * Permit launching Unity headlessly to obtain a real compile.
+   *
+   * Off by default because it is expensive and side-effecting: a batch run takes
+   * tens of seconds to minutes, can require a licence round-trip, and — when the
+   * installed editor is newer than the project — upgrades the project in place.
+   * None of that belongs behind a passive status poll; the caller asking to
+   * VERIFY a change opts in.
+   */
+  allowHeadlessCompile?: boolean;
   projectPath: string;
   bridgeError: string;
 }
@@ -149,7 +159,11 @@ export async function getStaticConsoleSnapshot(
 export async function getStaticCompileStatus(
   options: StaticCompileOptions,
 ): Promise<CompileStatusPayload> {
-  const dotnetSnapshot = await tryRunDotnetBuild(options.projectPath, 200);
+  const dotnetSnapshot = await tryRunDotnetBuild(
+    options.projectPath,
+    200,
+    options.allowHeadlessCompile,
+  );
   if (dotnetSnapshot) {
     const errorCount = dotnetSnapshot.entries.filter((entry) => isErrorType(entry.type)).length;
     const warningCount = dotnetSnapshot.entries.filter((entry) => String(entry.type).toLowerCase() === 'warning').length;
@@ -180,7 +194,9 @@ export async function getStaticCompileStatus(
   }
 
   // No .NET SDK on this machine? Unity can still compile the project itself.
-  const batchSnapshot = await tryUnityBatchCompile(options.projectPath);
+  const batchSnapshot = options.allowHeadlessCompile
+    ? await tryUnityBatchCompile(options.projectPath)
+    : null;
   if (batchSnapshot) {
     const errorCount = batchSnapshot.entries.filter((entry) => isErrorType(entry.type)).length;
     const warningCount = batchSnapshot.entries.filter(
@@ -273,7 +289,8 @@ export async function getStaticCompileStatus(
       'Compile status is UNKNOWN — nothing verified this project. No Unity bridge; ' +
       'no Unity editor installed for a headless compile; ' +
       'no .NET SDK or .sln for an offline `dotnet build`; and no Editor.log belonging to ' +
-      'this project. Do not treat this as a successful compile.',
+      'this project. Do not treat this as a successful compile. Run a verification ' +
+      'that permits a headless Unity compile to get a real answer.',
     compile: {
       isCompiling: false,
       isReloading: false,
@@ -378,9 +395,13 @@ async function tryReadEditorLogSnapshot(
 async function tryRunDotnetBuild(
   projectPath: string,
   limit: number,
+  allowHeadlessCompile = false,
 ): Promise<DotnetBuildSnapshot | null> {
+  // Generating a missing solution means launching Unity, which is the expensive,
+  // side-effecting operation a passive poll must never trigger.
   const solutionPath =
-    (await findSolutionPath(projectPath)) ?? (await trySyncSolutionHeadless(projectPath));
+    (await findSolutionPath(projectPath)) ??
+    (allowHeadlessCompile ? await trySyncSolutionHeadless(projectPath) : null);
   if (!solutionPath) {
     return null;
   }
