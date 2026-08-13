@@ -209,4 +209,23 @@ describe('BatchExecuteTool', () => {
         expect(output.failureCount).toBe(0);
       });
   });
+
+  it('routes operations through an injected resolver when the host provides one', async () => {
+    // The host registers its own file_write under the same name and its version
+    // wins for direct calls; without this the same name behaved differently
+    // inside a batch — the host's enforces a size cap and writes Unity .meta
+    // files, this package's does neither.
+    const hostTool = createMockTool('tool_a', () => ({ content: 'HOST' }));
+    tool.setToolResolver({ get: (name: string) => (name === 'tool_a' ? hostTool : undefined) } as never);
+
+    const result = await tool.execute({ operations: [{ tool: 'tool_a', input: {} }] }, ctx);
+    const output = JSON.parse(result.content) as { results: Array<{ content: string }> };
+    expect(output.results[0]!.content).toBe('HOST');
+  });
+
+  it('falls back to its own registry when no resolver is injected', async () => {
+    const result = await tool.execute({ operations: [{ tool: 'tool_a', input: {} }] }, ctx);
+    const output = JSON.parse(result.content) as { results: Array<{ content: string }> };
+    expect(output.results[0]!.content).toBe('result_a');
+  });
 });

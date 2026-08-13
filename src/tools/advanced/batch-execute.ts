@@ -67,6 +67,28 @@ export class BatchExecuteTool implements ITool {
 
   constructor(private readonly registry: ToolRegistry) {}
 
+  /**
+   * Resolves inner operations through the HOST's registry instead of this
+   * package's own.
+   *
+   * When Strada.MCP is loaded into a host, the host registers these tools under
+   * the same names as its own and its versions win for direct calls — but a
+   * batch kept dispatching through the local registry, so the same tool name
+   * behaved differently inside and outside a batch. Measured on file_write:
+   * the host's enforces a 256 KB cap and writes Unity .meta files, this
+   * package's does neither, and the two disagreed about path rules besides.
+   * 22 tool names are shadowed this way; routing here fixes all of them at once
+   * rather than keeping the implementations in sync by hand.
+   *
+   * Mirrors setBridgeClient/setEditorRouter: the host discovers the setter and
+   * injects. Left unset, the local registry is used exactly as before.
+   */
+  setToolResolver(resolver: Pick<ToolRegistry, 'get'>): void {
+    this.resolver = resolver;
+  }
+
+  private resolver?: Pick<ToolRegistry, 'get'>;
+
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const parsed = batchInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -112,7 +134,7 @@ export class BatchExecuteTool implements ITool {
         continue;
       }
 
-      const tool = this.registry.get(op.tool);
+      const tool = (this.resolver ?? this.registry).get(op.tool);
       if (!tool) {
         results.push({
           tool: op.tool,
