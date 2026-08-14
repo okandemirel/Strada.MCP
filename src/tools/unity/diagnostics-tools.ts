@@ -125,6 +125,15 @@ abstract class CompositeBridgeTool implements ITool {
   protected readonly dangerousTool = false;
   protected readonly requiredBridgeMethods: readonly string[] = [];
   protected readonly requiredBridgeCapabilities: readonly string[] = [];
+  /**
+   * Whether the tool is useless without a live editor bridge.
+   *
+   * The host hides tools whose metadata says they need a bridge when none is
+   * connected, so this decides whether the agent is even offered the tool — not
+   * merely how it behaves. A tool with a real offline path must say false, or
+   * that path can never be reached.
+   */
+  protected readonly bridgeRequired: boolean = true;
 
   private bridgeClient: BridgeClient | null = null;
   private _inputSchema: Record<string, unknown> | null = null;
@@ -139,7 +148,7 @@ abstract class CompositeBridgeTool implements ITool {
   get metadata(): ToolMetadata {
     return {
       category: this.toolCategory,
-      requiresBridge: true,
+      requiresBridge: this.bridgeRequired,
       dangerous: this.dangerousTool,
       readOnly: this.readOnlyTool,
       requiredBridgeMethods: [...this.requiredBridgeMethods],
@@ -431,6 +440,12 @@ export class ProjectToolInvokeTool extends SimpleJsonBridgeTool {
 }
 
 export class VerifyChangeTool extends CompositeBridgeTool {
+  // Offered with the editor closed, because it works with the editor closed: it
+  // falls back to a headless Unity compile. Measured before this line existed —
+  // the host hid the tool whenever the bridge was down, so across four live runs
+  // the agent never called it once and shipped 45 files of unverified C#. The
+  // offline path was unreachable, not unused.
+  protected override readonly bridgeRequired = false;
   readonly name = 'unity_verify_change';
   readonly description =
     'Run a closed verification loop across compile status, console analysis, tests, optional screenshot capture, optional build, and optional Strada profiling';

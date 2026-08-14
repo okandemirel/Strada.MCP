@@ -112,4 +112,21 @@ describe('unity_verify_change without a bridge', () => {
     expect(result.isError).toBeFalsy();
     expect(result.content).toContain('UNKNOWN');
   });
+
+  it("is offered to the agent even with no bridge connected", async () => {
+    // The host hides tools whose metadata claims they need a bridge. While
+    // unity_verify_change claimed that, the offline path added above could never
+    // be reached: measured across four live runs with the editor closed, the
+    // agent called unity_compile_status twelve times and unity_verify_change
+    // zero times — it was not in the tool list at all.
+    const tool = new VerifyChangeTool();
+    expect(tool.metadata.requiresBridge).toBe(false);
+  });
+
+  it("leaves bridge-only siblings requiring a bridge", async () => {
+    // The flag is per-tool, not a blanket relaxation: a tool with no offline
+    // path must still be hidden rather than offered and then failing.
+    const { CompileWaitTool } = await import("./diagnostics-tools.js");
+    expect(new CompileWaitTool().metadata.requiresBridge).toBe(true);
+  });
 });
