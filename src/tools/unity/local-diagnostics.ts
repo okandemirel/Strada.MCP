@@ -860,10 +860,26 @@ function isStackTraceLine(line: string): boolean {
   return /^\s*at\b/.test(line) || /^\s*\(at .+\)$/.test(line);
 }
 
+/**
+ * Whether a console entry explains why compilation failed.
+ *
+ * Assembly-definition problems belong here even though they carry no CS code and
+ * name no .cs file. Unity reports a malformed .asmdef as
+ * `JSON parse error: Invalid value. (Assets/…/X.Tests.asmdef)` followed by
+ * `Scripts have compiler errors.` — the first line names the exact file, and the
+ * old filter dropped it: no CS number, no "assembly" or "compile" keyword, and a
+ * path ending in .asmdef rather than .cs.
+ *
+ * Measured: with four malformed .asmdef files in a project, unity_verify_change
+ * reported a failed compile with no entry explaining it. The agent verified
+ * three times, opened all four files, and repaired none — it had been told the
+ * build was broken and not what had broken it.
+ */
 function isCompileRelatedEntry(entry: ConsoleLogEntry): boolean {
   const message = `${entry.message ?? ''}\n${entry.stackTrace ?? ''}`;
   return /\b(?:CS|BC|NU)\d{4}\b/.test(message)
     || /\b(?:compil(?:e|ation)|script error|assembly|namespace|type or namespace)\b/i.test(message)
+    || /\.asmdef\b/i.test(message)
     || Boolean(entry.file?.endsWith('.cs'));
 }
 
