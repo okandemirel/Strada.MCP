@@ -88,4 +88,34 @@ describe('malformed assembly definitions', () => {
     expect(status.compile.compileIssueCount).toBeGreaterThan(0);
     expect(Number(status.diagnostics?.['errorCount'])).toBeGreaterThan(0);
   });
+
+  it("treats a folder with several assembly definitions as an error", async () => {
+    // Unity states this one without the word "error", so it was classified as a
+    // log line: a project that cannot build reported zero errors. Measured
+    // verbatim from a headless run after five per-layer test assemblies were
+    // written into one Tests/Editor folder.
+    execFileMock.mockImplementation((file: string, _a: string[], _o: unknown, cb: Function) => {
+      if (file === unity) {
+        cb(
+          Object.assign(new Error("exit 1"), {
+            code: 1,
+            stdout: [
+              "Folder 'Assets/Modules/PixelFlow/Tests/Editor/' contains multiple assembly definition files (Assets/Modules/PixelFlow/Tests/Editor/PixelFlow.Core.Editor.Tests.asmdef)",
+              "Scripts have compiler errors.",
+            ].join("\n"),
+            stderr: "",
+          }),
+        );
+        return;
+      }
+      cb(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    });
+
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
+
+    expect(status.compile.lastSucceeded).toBe(false);
+    expect(Number(status.diagnostics?.["errorCount"])).toBeGreaterThan(0);
+    // And it must name the folder, or the agent cannot act on it.
+    expect(JSON.stringify(status.diagnostics?.["entries"] ?? [])).toContain("Tests/Editor/");
+  });
 });

@@ -827,6 +827,18 @@ function classifyLineType(line: string): string {
     return 'error';
   }
 
+  // Fatal conditions Unity states without using the word "error". Left as
+  // 'log' they are counted as information, so a verdict reports zero errors on
+  // a project that cannot build. Measured: five test assemblies placed in one
+  // folder produced "Folder '…/Tests/Editor/' contains multiple assembly
+  // definition files" and nothing else, and the agent read it as a clean run.
+  if (
+    /contains multiple assembly definition files/i.test(line) ||
+    /\bscripts have compiler errors\b/i.test(line)
+  ) {
+    return 'error';
+  }
+
   if (/\bwarning\b/i.test(line)) {
     return 'warning';
   }
