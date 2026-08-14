@@ -134,6 +134,8 @@ abstract class CompositeBridgeTool implements ITool {
    * that path can never be reached.
    */
   protected readonly bridgeRequired: boolean = true;
+  /** Set by tools that can legitimately run past a host's default cap. */
+  protected readonly toolTimeoutMs: number | undefined = undefined;
 
   private bridgeClient: BridgeClient | null = null;
   private _inputSchema: Record<string, unknown> | null = null;
@@ -153,6 +155,7 @@ abstract class CompositeBridgeTool implements ITool {
       readOnly: this.readOnlyTool,
       requiredBridgeMethods: [...this.requiredBridgeMethods],
       requiredBridgeCapabilities: [...this.requiredBridgeCapabilities],
+      ...(this.toolTimeoutMs === undefined ? {} : { timeoutMs: this.toolTimeoutMs }),
     };
   }
 
@@ -446,6 +449,11 @@ export class VerifyChangeTool extends CompositeBridgeTool {
   // the agent never called it once and shipped 45 files of unverified C#. The
   // offline path was unreachable, not unused.
   protected override readonly bridgeRequired = false;
+  // A headless Unity compile takes tens of seconds to minutes, plus a possible
+  // licence round-trip. Generous enough that the inner batch timeout (300s) is
+  // what actually fires, so a hang is reported as a compile timeout with
+  // diagnostics rather than as an opaque host-level kill.
+  protected override readonly toolTimeoutMs = 360_000;
   readonly name = 'unity_verify_change';
   readonly description =
     'Run a closed verification loop across compile status, console analysis, tests, optional screenshot capture, optional build, and optional Strada profiling';
