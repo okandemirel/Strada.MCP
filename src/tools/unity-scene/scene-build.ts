@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from '../unity/local-diagnostics.js';
+import { emitBootSmokeTest } from './boot-smoke-test.js';
 
 /**
  * Assemble a Unity scene from a declarative spec, with no Editor open.
@@ -46,6 +47,13 @@ export class SceneBuildTool implements ITool {
       projectPath: {
         type: 'string',
         description: 'Unity project root. Defaults to the tool context project path.',
+      },
+      emitBootTest: {
+        type: 'boolean',
+        description:
+          'Also write a PlayMode test that loads the assembled scene and asserts the ' +
+          'GameBootstrapper initialized (default true). Without it, unity_playmode_verify has ' +
+          'nothing to run, and a run of nothing is not a pass.',
       },
     },
     required: [],
@@ -113,6 +121,12 @@ export class SceneBuildTool implements ITool {
         '-stradaResult', resultPath,
         '-logFile', logPath,
       ];
+      // Written before Unity is invoked so the test compiles in the same pass
+      // that assembles the scene, rather than needing a second cold start.
+      const boot = input['emitBootTest'] === false
+        ? { written: false, reason: 'not requested', paths: [] as string[] }
+        : emitBootSmokeTest(projectPath, this.sceneName(specJson));
+
       const exitCode = await this.runUnity(editor.binary, args, 350_000);
 
       if (!existsSync(resultPath)) {
@@ -142,7 +156,7 @@ export class SceneBuildTool implements ITool {
       };
 
       return {
-        content: this.render(verdict),
+        content: this.render(verdict) + this.renderBootTest(boot),
         // A wrong wiring has to be loud: the run that quietly delivered a
         // library is the failure this tool exists to make impossible.
         isError: !verdict.assembled,
@@ -150,6 +164,28 @@ export class SceneBuildTool implements ITool {
     } finally {
       try { rmSync(scratch, { recursive: true, force: true }); } catch { /* scratch */ }
     }
+  }
+
+  /**
+   * The scene's name as SceneManager.LoadSceneAsync wants it: no directory, no
+   * extension. Taken from the spec rather than guessed.
+   */
+  private sceneName(specJson: string): string {
+    try {
+      const spec = JSON.parse(specJson) as { scene?: { path?: string } };
+      const path = spec.scene?.path ?? '';
+      const base = path.replace(/\\/g, '/').split('/').pop() ?? '';
+      return base.replace(/\.unity$/i, '') || 'Main';
+    } catch {
+      return 'Main';
+    }
+  }
+
+  private renderBootTest(boot: { written: boolean; reason?: string; paths: string[] }): string {
+    if (boot.written) {
+      return `\n\nBoot test written (run it with unity_playmode_verify):\n  ${boot.paths.join('\n  ')}`;
+    }
+    return `\n\nNo boot test written: ${boot.reason ?? 'unknown reason'}`;
   }
 
   private resolveSpec(input: Record<string, unknown>): string | null {
