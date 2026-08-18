@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -22,6 +22,33 @@ import { join } from 'node:path';
 
 /** Where the generated check lives, relative to the project root. */
 export const BOOT_TEST_DIR = 'Assets/Tests/PlayMode';
+/** Where the check may live, in order of preference. */
+export const TEST_DIR_CANDIDATES = [BOOT_TEST_DIR, 'Assets/Tests/StradaPlayMode'] as const;
+
+/**
+ * The first candidate folder that is free, or already ours.
+ *
+ * Free means: no .asmdef, or only the one this generator wrote. Returns null
+ * when every candidate belongs to someone else, because adding a second .asmdef
+ * to a folder is a compile error for everything in it.
+ */
+export function chooseTestDir(projectPath: string): string | null {
+  for (const candidate of TEST_DIR_CANDIDATES) {
+    const dir = join(projectPath, candidate);
+    if (!existsSync(dir)) return dir;
+
+    let foreign: string[];
+    try {
+      foreign = readdirSync(dir).filter(
+        (f) => f.endsWith('.asmdef') && f !== `${BOOT_TEST_ASSEMBLY}.asmdef`,
+      );
+    } catch {
+      continue;
+    }
+    if (foreign.length === 0) return dir;
+  }
+  return null;
+}
 export const BOOT_TEST_ASSEMBLY = 'Strada.Generated.PlayModeTests';
 
 const CAPTURE_METHOD = `    /// <summary>
@@ -60,6 +87,19 @@ const CAPTURE_METHOD = `    /// <summary>
         const int width = 1280;
         const int height = 720;
 
+        // A Screen Space - Overlay Canvas is composited straight to the screen
+        // and drawn by no camera, so it is absent from a RenderTexture by
+        // construction. That is Unity's default for a new Canvas, which makes a
+        // menu, card or puzzle game record as an empty skybox and still report
+        // a recording. Point those canvases at the capture camera for the
+        // duration, and put them back afterwards.
+        var overlays = new System.Collections.Generic.List<Canvas>();
+        foreach (var canvas in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+        {
+            if (canvas.renderMode != RenderMode.ScreenSpaceOverlay) continue;
+            overlays.Add(canvas);
+        }
+
         var target = new RenderTexture(width, height, 24);
         var readback = new Texture2D(width, height, TextureFormat.RGB24, false);
         var previousTarget = camera.targetTexture;
@@ -67,6 +107,11 @@ const CAPTURE_METHOD = `    /// <summary>
 
         System.IO.Directory.CreateDirectory(dir);
         camera.targetTexture = target;
+        foreach (var canvas in overlays)
+        {
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = camera;
+        }
         try
         {
             for (var i = 0; i < frames; i++)
@@ -85,6 +130,11 @@ const CAPTURE_METHOD = `    /// <summary>
         }
         finally
         {
+            foreach (var canvas in overlays)
+            {
+                canvas.worldCamera = null;
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            }
             camera.targetTexture = previousTarget;
             RenderTexture.active = previousActive;
             Object.DestroyImmediate(readback);
@@ -214,7 +264,24 @@ export function emitBootSmokeTest(
     };
   }
 
-  const dir = join(projectPath, BOOT_TEST_DIR);
+  // Assets/Tests/PlayMode is not an arbitrary path — it is the folder Unity's
+  // own Test Runner creates for "Create PlayMode Test Assembly Folder", complete
+  // with its own .asmdef. Unity permits exactly one per folder, so writing a
+  // second one there does not merely fail to add a test: it stops the folder
+  // compiling, taking the user's existing tests with it.
+  const dir = chooseTestDir(projectPath);
+  if (dir === null) {
+    return {
+      written: false,
+      reason:
+        `every candidate folder (${TEST_DIR_CANDIDATES.join(', ')}) already holds an assembly ` +
+        'definition that is not ours, and Unity allows only one per folder. Move or remove one, ' +
+        'or pass emitBootTest: false and write the play-mode check yourself.',
+      paths: [],
+    };
+  }
+
+  const relativeDir = dir.slice(projectPath.length + 1).replace(/\\/g, '/');
   const { source, asmdef } = buildBootSmokeTest(sceneName, withCapture);
   const sourcePath = join(dir, 'StradaBootSmokeTest.cs');
   const asmdefPath = join(dir, `${BOOT_TEST_ASSEMBLY}.asmdef`);
@@ -229,7 +296,7 @@ export function emitBootSmokeTest(
 
   return {
     written: true,
-    paths: [`${BOOT_TEST_DIR}/StradaBootSmokeTest.cs`, `${BOOT_TEST_DIR}/${BOOT_TEST_ASSEMBLY}.asmdef`],
+    paths: [`${relativeDir}/StradaBootSmokeTest.cs`, `${relativeDir}/${BOOT_TEST_ASSEMBLY}.asmdef`],
     capture: withCapture,
     reason: withCapture ? undefined : 'recording was not requested',
   };

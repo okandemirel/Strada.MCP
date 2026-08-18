@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   buildBootSmokeTest,
+  chooseTestDir,
+  TEST_DIR_CANDIDATES,
   emitBootSmokeTest,
   hasTestFramework,
   BOOT_TEST_DIR,
@@ -162,5 +164,78 @@ describe('the recording it can do', () => {
 
   it('numbers frames so an encoder can find the sequence', () => {
     expect(buildBootSmokeTest('Main').source).toContain('frame_{i:D5}.png');
+  });
+});
+
+describe("where the check is allowed to live", () => {
+  const withAsmdef = (name: string): string => {
+    const root = project(WITH_FRAMEWORK);
+    const dir = join(root, BOOT_TEST_DIR);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), '{"name":"Whatever"}');
+    return root;
+  };
+
+  it("uses the standard folder when it is free", () => {
+    const root = project(WITH_FRAMEWORK);
+
+    expect(chooseTestDir(root)).toBe(join(root, BOOT_TEST_DIR));
+  });
+
+  it("steps aside when Unity's Test Runner already owns that folder", () => {
+    // Assets/Tests/PlayMode is exactly what "Create PlayMode Test Assembly
+    // Folder" makes, complete with its own .asmdef. Unity allows one per
+    // folder; a second is a compile error for everything in it, including the
+    // user's own tests.
+    const root = withAsmdef("Tests.asmdef");
+
+    const chosen = chooseTestDir(root);
+
+    expect(chosen).not.toBeNull();
+    expect(chosen).not.toContain(BOOT_TEST_DIR);
+    expect(chosen).toContain(TEST_DIR_CANDIDATES[1]);
+  });
+
+  it("reuses the folder when the .asmdef there is its own", () => {
+    const root = withAsmdef("Strada.Generated.PlayModeTests.asmdef");
+
+    expect(chooseTestDir(root)).toContain(BOOT_TEST_DIR);
+  });
+
+  it("refuses rather than breaking a folder when every candidate is taken", () => {
+    const root = project(WITH_FRAMEWORK);
+    for (const candidate of TEST_DIR_CANDIDATES) {
+      const dir = join(root, candidate);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "Someone.asmdef"), "{}");
+    }
+
+    expect(chooseTestDir(root)).toBeNull();
+
+    const emission = emitBootSmokeTest(root, "Main");
+    expect(emission.written).toBe(false);
+    expect(emission.reason).toContain("only one per folder");
+  });
+});
+
+describe("recording a game whose screen is UI", () => {
+  it("brings Screen Space - Overlay canvases into the capture", () => {
+    // An overlay Canvas is composited straight to the screen and drawn by no
+    // camera, so it is absent from a RenderTexture by construction — and that
+    // is Unity's default for a new Canvas. A menu or card game recorded as an
+    // empty skybox and still reported a recording.
+    const { source } = buildBootSmokeTest("Main");
+
+    expect(source).toContain("RenderMode.ScreenSpaceOverlay");
+    expect(source).toContain("RenderMode.ScreenSpaceCamera");
+    expect(source).toContain("canvas.worldCamera = camera;");
+  });
+
+  it("puts them back, because the capture runs inside a verification", () => {
+    const { source } = buildBootSmokeTest("Main");
+    const finallyBlock = source.slice(source.indexOf("finally"));
+
+    expect(finallyBlock).toContain("RenderMode.ScreenSpaceOverlay");
+    expect(finallyBlock).toContain("canvas.worldCamera = null;");
   });
 });
