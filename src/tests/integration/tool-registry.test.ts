@@ -138,9 +138,9 @@ describe('Tool Registry Integration', () => {
     expect(registry.getAll().length).toBe(tools.length);
   });
 
-  it('should have 127 total tools', () => {
+  it('should have 128 total tools', () => {
     const tools = createAllTools();
-    expect(tools.length).toBe(127);
+    expect(tools.length).toBe(128);
   });
 
   it('should have no duplicate tool names', () => {
@@ -158,7 +158,7 @@ describe('Tool Registry Integration', () => {
     }
 
     const expected: Record<ToolCategory, number> = {
-      'unity-runtime': 42,
+      'unity-runtime': 43,
       'strada': 18,
       'file': 6,
       'search': 3,

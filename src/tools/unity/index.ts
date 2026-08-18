@@ -31,6 +31,12 @@ export {
   ExecuteMenuTool,
 } from './playmode-tools.js';
 
+// Headless play-mode verification (1)
+// Separate from the three above: those drive an Editor over the bridge, this one
+// runs play mode with no Editor at all, which is the only path available when
+// the agent works unattended.
+export { PlaymodeVerifyTool } from './playmode-verify.js';
+
 // Editor utility tools (4)
 export {
   ConsoleLogTool,
