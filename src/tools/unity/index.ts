@@ -94,3 +94,6 @@ export {
 } from './productivity-tools.js';
 
 // Total: 46 tools
+
+// The user's own Asset Store downloads (1)
+export { MyAssetsTool } from './my-assets.js';
