@@ -97,3 +97,4 @@ export {
 
 // The user's own Asset Store downloads (1)
 export { MyAssetsTool } from './my-assets.js';
+export { ImportAssetPackageTool } from './package-import-tool.js';
