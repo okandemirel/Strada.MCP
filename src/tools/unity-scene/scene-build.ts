@@ -36,9 +36,15 @@ export class SceneBuildTool implements ITool {
         type: 'object',
         description:
           'The scene specification. Shape: { specVersion, scene: {path, mode, addToBuildSettings}, ' +
-          'assets: [{id, type, path, fields}], objects: [{id, name, parent, components: [{type, fields}]}] }. ' +
-          'A field is {name, kind, ...} where kind is "reference" | "string" | "int" | "bool" | "float"; ' +
-          'a reference carries {reference: "<id of an asset or object in this spec>"}.',
+          'assets: [{id, type, path, fields}], objects: [{id, name, parent, prefabPath, keepInScene, ' +
+          'components: [{type, fields}]}] }. ' +
+          'A field is {name, kind, ...} where kind is "reference" | "prefab" | "string" | "int" | ' +
+          '"bool" | "float"; a reference or prefab carries {reference: "<id in this spec>"}. ' +
+          'Give an object a prefabPath to save it as a prefab asset once its fields are applied, and ' +
+          'keepInScene: false when it is only a template the game spawns at runtime — otherwise the ' +
+          'first frame has two of it. kind "prefab" resolves to the saved prefab ASSET while kind ' +
+          '"reference" resolves to the scene INSTANCE; a field holding something to spawn wants the ' +
+          'asset, a field holding what is already on screen wants the instance.',
       },
       specPath: {
         type: 'string',
