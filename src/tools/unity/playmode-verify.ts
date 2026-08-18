@@ -153,7 +153,15 @@ export class PlaymodeVerifyTool implements ITool {
         ? String(input['captureDir'] ?? join(projectPath, 'Recordings'))
         : null;
       if (captureDir !== null) {
-        try { mkdirSync(captureDir, { recursive: true }); } catch { /* reported below */ }
+        try {
+          mkdirSync(captureDir, { recursive: true });
+          // Frames left by an earlier run would otherwise be counted, encoded
+          // and reported as this one's recording — including for a run that
+          // captured nothing because it failed before play even started.
+          for (const stale of readdirSync(captureDir)) {
+            if (/^frame_\d+\.png$/.test(stale)) rmSync(join(captureDir, stale), { force: true });
+          }
+        } catch { /* reported below as no frames */ }
       }
 
       const args = buildPlaymodeArgs({
@@ -263,6 +271,10 @@ export class PlaymodeVerifyTool implements ITool {
       // carry the test-runner prefix and are not the game misbehaving.
       if (line.includes('UnityEngine.TestTools')) continue;
       if (line.includes('Expected log did not appear')) continue;
+      // A test that deliberately expects an exception logs it, and LogAssert
+      // then reports the match. Counting those failed a green run for doing
+      // exactly what it was written to do.
+      if (line.includes('LogAssert.Expect') || line.includes('Expected log message')) continue;
       const trimmed = line.trim();
       if (trimmed !== '') seen.add(trimmed);
       if (seen.size >= 10) break;

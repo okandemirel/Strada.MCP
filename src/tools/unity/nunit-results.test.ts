@@ -72,6 +72,21 @@ describe('the play-mode verdict', () => {
     expect(verdict).toEqual({ passed: false, reason: 'threw' });
   });
 
+  it('refuses to call an all-skipped run a pass', () => {
+    // total > 0 and failed === 0 while nothing executed: the same emptiness the
+    // total check catches, arriving through a different door. NUnit skips a
+    // whole assembly when its constraints exclude the platform.
+    const skipped = { result: 'Skipped', total: 4, passed: 0, failed: 0, skipped: 4 };
+
+    expect(playmodeVerdict(skipped)).toEqual({ passed: false, reason: 'nothing-ran' });
+  });
+
+  it('still passes a run where some tests were skipped and the rest passed', () => {
+    const mixed = { result: 'Passed', total: 4, passed: 3, failed: 0, skipped: 1 };
+
+    expect(playmodeVerdict(mixed).passed).toBe(true);
+  });
+
   it('fails when no results file was parsed at all', () => {
     expect(playmodeVerdict(null).reason).toBe('no-results');
   });

@@ -97,8 +97,9 @@ export class MyAssetsTool implements ITool {
     }
 
     const shown = matches.slice(0, limit);
+    const hidden = matches.length - shown.length;
     const inspect = input['inspect'] === true;
-    return { content: this.render(shown, packages.length, query, inspect), isError: false };
+    return { content: this.render(shown, packages.length, query, inspect, hidden), isError: false };
   }
 
   private render(
@@ -106,6 +107,7 @@ export class MyAssetsTool implements ITool {
     total: number,
     query: string,
     inspect: boolean,
+    hidden: number,
   ): string {
     const lines: string[] = [];
     lines.push(
@@ -130,6 +132,11 @@ export class MyAssetsTool implements ITool {
       for (const path of contents.paths) lines.push(`      ${path}`);
     }
 
+    if (hidden > 0) {
+      // Silence here would read as "this is all of it", and the package that
+      // actually fits could be the one that was cut.
+      lines.push('', `${hidden} further match(es) not shown; raise limit to see them.`);
+    }
     if (!inspect) {
       lines.push('', 'Pass inspect: true to see what is actually inside these, rather than judging by name.');
     }

@@ -73,6 +73,11 @@ export function playmodeVerdict(
   if (outcome === null) return { passed: false, reason: "no-results" };
   if (outcome.total === 0) return { passed: false, reason: "nothing-ran" };
   if (outcome.failed > 0) return { passed: false, reason: "tests-failed" };
+  // A run where every test was skipped satisfies total > 0 and failed === 0
+  // while executing nothing — the same emptiness the total check was written to
+  // catch, arriving through a different door. NUnit skips a whole assembly when
+  // its constraints exclude the platform, so this is not a rare shape.
+  if (outcome.passed === 0) return { passed: false, reason: "nothing-ran" };
   if (exceptions.length > 0) return { passed: false, reason: "threw" };
   return { passed: true, reason: "ok" };
 }

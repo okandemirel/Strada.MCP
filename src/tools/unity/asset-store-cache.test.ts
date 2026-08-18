@@ -92,6 +92,16 @@ describe('finding the package that fits', () => {
     expect(searchPackages(packages, 'spaceship cockpit')).toEqual([]);
   });
 
+  it('returns nothing rather than everything for an all-one-letter query', () => {
+    // Falling back to "everything matches" would hand the agent an arbitrary
+    // package to import when nothing was usefully searched for.
+    expect(searchPackages(packages, 'a b')).toEqual([]);
+  });
+
+  it('lists everything only when there is no query at all', () => {
+    expect(searchPackages(packages, '')).toHaveLength(packages.length);
+  });
+
   it('ignores one-letter noise in the query', () => {
     expect(searchPackages(packages, 'a car').map((r) => r.name)).toEqual(['ARCADE FREE Racing Car']);
   });

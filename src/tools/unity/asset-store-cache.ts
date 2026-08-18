@@ -84,7 +84,10 @@ export function searchPackages(
   query: string,
 ): Array<PurchasedPackage & { score: number }> {
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
-  if (terms.length === 0) return packages.map((p) => ({ ...p, score: 0 }));
+  // A query of only one-letter words is a query, not an absence of one. Falling
+  // back to "everything matches" would hand the agent an arbitrary package to
+  // import when the honest answer is that nothing was searched for usefully.
+  if (terms.length === 0) return query.trim() === '' ? packages.map((p) => ({ ...p, score: 0 })) : [];
 
   const scored = packages.map((p) => {
     const name = p.name.toLowerCase();
