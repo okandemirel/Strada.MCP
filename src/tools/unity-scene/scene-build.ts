@@ -54,6 +54,14 @@ export class SceneBuildTool implements ITool {
         type: 'string',
         description: 'Unity project root. Defaults to the tool context project path.',
       },
+      emitCapture: {
+        type: 'boolean',
+        description:
+          'Include frame-recording code in the generated boot test (default true). It renders the ' +
+          'camera into a RenderTexture and only runs when unity_playmode_verify asks for a ' +
+          'recording, so it costs nothing otherwise. Turn it off for a project whose Unity build ' +
+          'lacks the image-conversion module.',
+      },
       emitBootTest: {
         type: 'boolean',
         description:
@@ -131,7 +139,7 @@ export class SceneBuildTool implements ITool {
       // that assembles the scene, rather than needing a second cold start.
       const boot = input['emitBootTest'] === false
         ? { written: false, reason: 'not requested', paths: [] as string[] }
-        : emitBootSmokeTest(projectPath, this.sceneName(specJson));
+        : emitBootSmokeTest(projectPath, this.sceneName(specJson), input['emitCapture'] !== false);
 
       const exitCode = await this.runUnity(editor.binary, args, 350_000);
 
@@ -187,9 +195,12 @@ export class SceneBuildTool implements ITool {
     }
   }
 
-  private renderBootTest(boot: { written: boolean; reason?: string; paths: string[] }): string {
+  private renderBootTest(
+    boot: { written: boolean; reason?: string; paths: string[]; capture?: boolean },
+  ): string {
     if (boot.written) {
-      return `\n\nBoot test written (run it with unity_playmode_verify):\n  ${boot.paths.join('\n  ')}`;
+      const note = boot.capture === false ? `\n  note: ${boot.reason}` : '';
+      return `\n\nBoot test written (run it with unity_playmode_verify):\n  ${boot.paths.join('\n  ')}${note}`;
     }
     return `\n\nNo boot test written: ${boot.reason ?? 'unknown reason'}`;
   }

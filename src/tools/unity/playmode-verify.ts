@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
@@ -25,6 +25,42 @@ import { parseTestRun, failedTestNames, playmodeVerdict } from './nunit-results.
  *   that over and returns 0 whatever the tests did.
  * - Never accept a run of nothing. Zero executed tests satisfies "none failed".
  */
+
+/**
+ * The Unity command line for a play-mode run.
+ *
+ * Pure and exported so the two rules that make its verdict trustworthy can be
+ * tested without an Editor:
+ *
+ * - `-quit` is never present. The test runner owns EditorApplication.Exit and
+ *   returns a code that reflects the results; -quit overrides it with 0.
+ * - `-nographics` is dropped when recording, and only then. It is what makes a
+ *   headless run cheap, and also what leaves no graphics device to render into.
+ */
+export function buildPlaymodeArgs(options: {
+  projectPath: string;
+  resultsPath: string;
+  logPath: string;
+  capture?: boolean;
+  testFilter?: string;
+  categories?: string;
+}): string[] {
+  const args = [
+    '-batchmode',
+    ...(options.capture === true ? [] : ['-nographics']),
+    '-projectPath', options.projectPath,
+    '-runTests',
+    '-testPlatform', 'PlayMode',
+    '-testResults', options.resultsPath,
+    '-logFile', options.logPath,
+  ];
+  const filter = options.testFilter?.trim();
+  if (filter) args.push('-testFilter', filter);
+  const categories = options.categories?.trim();
+  if (categories) args.push('-testCategory', categories);
+  return args;
+}
+
 export class PlaymodeVerifyTool implements ITool {
   readonly name = 'unity_playmode_verify';
   readonly description =
@@ -50,6 +86,24 @@ export class PlaymodeVerifyTool implements ITool {
       categories: {
         type: 'string',
         description: 'Optional comma-separated NUnit categories to include.',
+      },
+      capture: {
+        type: 'boolean',
+        description:
+          'Record the run. Renders with a real graphics device instead of -nographics, writes PNG ' +
+          'frames, and encodes them to an mp4 when ffmpeg is installed. Slower, and it needs a ' +
+          'camera in the scene — a recording of a scene nothing renders is a stack of blank frames.',
+      },
+      captureDir: {
+        type: 'string',
+        description:
+          'Where to leave the frames and video. Defaults to <projectPath>/Recordings, which sits ' +
+          'beside Assets/ rather than inside it — Unity imports anything written under Assets/, ' +
+          'and a few hundred PNGs would become a few hundred textures in the project.',
+      },
+      captureFrames: {
+        type: 'number',
+        description: 'How many frames to record (default 120, about two seconds at 60 fps).',
       },
     },
     required: [],
@@ -91,26 +145,36 @@ export class PlaymodeVerifyTool implements ITool {
     const logPath = join(scratch, 'playmode.log');
 
     try {
-      const args = [
-        '-batchmode',
-        '-nographics',
-        // No -quit. See the class comment: it would make the exit code a lie.
-        '-projectPath', projectPath,
-        '-runTests',
-        '-testPlatform', 'PlayMode',
-        '-testResults', resultsPath,
-        '-logFile', logPath,
-      ];
-      const filter = input['testFilter'];
-      if (typeof filter === 'string' && filter.trim() !== '') {
-        args.push('-testFilter', filter.trim());
-      }
-      const categories = input['categories'];
-      if (typeof categories === 'string' && categories.trim() !== '') {
-        args.push('-testCategory', categories.trim());
+      // Capture needs a real graphics device, which is exactly what -nographics
+      // withholds. Verified on this path: batch mode without it initializes a
+      // Metal device and the tests still run headlessly.
+      const capture = input['capture'] === true;
+      const captureDir = capture
+        ? String(input['captureDir'] ?? join(projectPath, 'Recordings'))
+        : null;
+      if (captureDir !== null) {
+        try { mkdirSync(captureDir, { recursive: true }); } catch { /* reported below */ }
       }
 
-      const exitCode = await this.runUnity(editor.binary, args, 580_000);
+      const args = buildPlaymodeArgs({
+        projectPath,
+        resultsPath,
+        logPath,
+        capture,
+        testFilter: typeof input['testFilter'] === 'string' ? input['testFilter'] : undefined,
+        categories: typeof input['categories'] === 'string' ? input['categories'] : undefined,
+      });
+
+      const captureEnv: Record<string, string> = {};
+      if (captureDir !== null) {
+        captureEnv['STRADA_CAPTURE_DIR'] = captureDir;
+        const frames = input['captureFrames'];
+        if (typeof frames === 'number' && frames > 0) {
+          captureEnv['STRADA_CAPTURE_FRAMES'] = String(Math.floor(frames));
+        }
+      }
+
+      const exitCode = await this.runUnity(editor.binary, args, 580_000, captureEnv);
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
 
       if (!existsSync(resultsPath)) {
@@ -132,7 +196,9 @@ export class PlaymodeVerifyTool implements ITool {
       const verdict = playmodeVerdict(outcome, exceptions);
 
       return {
-        content: this.render(outcome, exceptions, failedTestNames(xml), exitCode, verdict.reason),
+        content:
+          this.render(outcome, exceptions, failedTestNames(xml), exitCode, verdict.reason) +
+          (captureDir === null ? '' : this.renderCapture(captureDir, log)),
         isError: !verdict.passed,
       };
     } finally {
@@ -147,6 +213,48 @@ export class PlaymodeVerifyTool implements ITool {
    * no assertion observes is reported to the console and nowhere else. The log
    * is the only place that shows up headlessly.
    */
+  /**
+   * What the recording produced, said plainly.
+   *
+   * Encodes to mp4 only when ffmpeg is on the machine. Frames alone are still a
+   * usable artifact, and claiming a video that was never made is worse than
+   * saying the encoder is missing.
+   */
+  private renderCapture(captureDir: string, log: string): string {
+    let frames: string[] = [];
+    try {
+      frames = readdirSync(captureDir).filter((f) => f.endsWith('.png')).sort();
+    } catch { /* reported as none */ }
+
+    if (frames.length === 0) {
+      // The test says why in the log when it declined; pass that through rather
+      // than guessing at the reason here.
+      const reason = /\[StradaCapture\][^\n]*/.exec(log)?.[0];
+      return `\n\nNo frames were captured. ${reason ?? 'The boot test may predate capture support; reassemble the scene to regenerate it.'}`;
+    }
+
+    const lines = [`\n\nRecorded ${frames.length} frame(s) in ${captureDir}`];
+    const video = join(captureDir, 'playmode.mp4');
+    const ffmpeg = spawnSync('ffmpeg', [
+      '-y', '-framerate', '30',
+      '-i', join(captureDir, 'frame_%05d.png'),
+      '-pix_fmt', 'yuv420p', video,
+      // Bounded: this blocks the tool, and an encode that never returns would
+      // hang the whole call for a nicety on top of a verification that already
+      // succeeded.
+    ], { stdio: 'ignore', timeout: 120_000 });
+
+    if (ffmpeg.error || ffmpeg.status !== 0) {
+      lines.push(
+        'ffmpeg is not installed or failed, so the frames were left unencoded. ' +
+        `Encode them with: ffmpeg -framerate 30 -i ${join(captureDir, 'frame_%05d.png')} -pix_fmt yuv420p ${video}`,
+      );
+    } else {
+      lines.push(`Video: ${video}`);
+    }
+    return lines.join('\n');
+  }
+
   private playModeExceptions(log: string): string[] {
     const seen = new Set<string>();
     for (const line of log.split('\n')) {
@@ -221,9 +329,17 @@ export class PlaymodeVerifyTool implements ITool {
     return lines.join('\n');
   }
 
-  private runUnity(binary: string, args: string[], timeoutMs: number): Promise<number> {
+  private runUnity(
+    binary: string,
+    args: string[],
+    timeoutMs: number,
+    env: Record<string, string> = {},
+  ): Promise<number> {
     return new Promise((resolve) => {
-      const child = spawn(binary, args, { stdio: 'ignore' });
+      const child = spawn(binary, args, {
+        stdio: 'ignore',
+        env: { ...process.env, ...env },
+      });
       // We never pass -quit, so a hung Editor is otherwise unbounded.
       const timer = setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already gone */ }

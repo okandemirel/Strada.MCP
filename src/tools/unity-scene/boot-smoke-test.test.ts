@@ -107,3 +107,60 @@ describe('writing it into a project', () => {
     expect(source).not.toContain('LoadSceneAsync("Main"');
   });
 });
+
+describe('the recording it can do', () => {
+  it('can be left out entirely, and the verification still stands', () => {
+    // The recording is an extra on top of a check the caller still needs, so
+    // omitting it must not touch what the test actually verifies.
+    const { source } = buildBootSmokeTest('Main', false);
+
+    expect(source).not.toContain('camera.Render()');
+    expect(source).toContain('Recording omitted');
+    expect(source).toContain('[UnityTest]');
+    expect(source).toContain('bootstrapper.IsInitialized');
+  });
+
+  it('captures nothing unless the harness asks', () => {
+    // The same generated test serves both runs: verifying is the job, a
+    // recording is something the caller may additionally want.
+    const { source } = buildBootSmokeTest('Main');
+
+    expect(source).toContain('STRADA_CAPTURE_DIR');
+    expect(source).toContain('if (string.IsNullOrEmpty(dir)) yield break;');
+  });
+
+  it('refuses to record a scene with no camera', () => {
+    // A capture of a scene nothing renders is a stack of identical blank
+    // frames, which looks like a recording and shows nothing.
+    const { source } = buildBootSmokeTest('Main');
+
+    expect(source).toContain('Camera.allCamerasCount == 0');
+    expect(source).toContain('nothing would be rendered');
+  });
+
+  it('renders the camera instead of reading the screen', () => {
+    // Batch mode has no screen buffer to read, and WaitForEndOfFrame does not
+    // reliably fire there either. Camera.Render() into a RenderTexture depends
+    // on neither.
+    const { source } = buildBootSmokeTest('Main');
+
+    expect(source).toContain('camera.Render()');
+    expect(source).toContain('new RenderTexture(');
+    // The call, not the word: the comment above it explains why it is absent.
+    expect(source).not.toContain('yield return new WaitForEndOfFrame');
+    expect(source).not.toContain('ScreenCapture.Capture');
+  });
+
+  it('puts the camera back and frees the textures', () => {
+    // The capture runs inside a verification the caller still needs; leaving a
+    // camera pointed at a released RenderTexture would break what follows.
+    const { source } = buildBootSmokeTest('Main');
+
+    expect(source).toContain('camera.targetTexture = previousTarget;');
+    expect(source).toContain('target.Release();');
+  });
+
+  it('numbers frames so an encoder can find the sequence', () => {
+    expect(buildBootSmokeTest('Main').source).toContain('frame_{i:D5}.png');
+  });
+});
