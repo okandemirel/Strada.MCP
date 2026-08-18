@@ -6,3 +6,4 @@ export { SceneAnalyzeTool } from './scene-analyze.js';
 export { PrefabCreateTool } from './prefab-create.js';
 export { PrefabInstantiateTool } from './prefab-instantiate.js';
 export { PrefabAnalyzeTool } from './prefab-analyze.js';
+export { SceneBuildTool } from './scene-build.js';

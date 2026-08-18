@@ -138,9 +138,9 @@ describe('Tool Registry Integration', () => {
     expect(registry.getAll().length).toBe(tools.length);
   });
 
-  it('should have 126 total tools', () => {
+  it('should have 127 total tools', () => {
     const tools = createAllTools();
-    expect(tools.length).toBe(126);
+    expect(tools.length).toBe(127);
   });
 
   it('should have no duplicate tool names', () => {
@@ -165,7 +165,7 @@ describe('Tool Registry Integration', () => {
       'git': 6,
       'dotnet': 2,
       'advanced': 8,
-      'unity-scene': 8,
+      'unity-scene': 9,
       'unity-asset': 10,
       'unity-subsystem': 6,
       'unity-config': 6,

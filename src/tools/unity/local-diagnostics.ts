@@ -632,7 +632,7 @@ export interface ResolvedUnityEditor {
  * ProjectSettings/ProjectVersion.txt, and the user should learn that from the
  * diagnostic rather than discover it later.
  */
-async function findUnityEditor(projectPath: string): Promise<ResolvedUnityEditor | null> {
+export async function findUnityEditor(projectPath: string): Promise<ResolvedUnityEditor | null> {
   const projectVersion = await readProjectVersion(projectPath);
 
   const configured = process.env.UNITY_EDITOR_PATH?.trim();

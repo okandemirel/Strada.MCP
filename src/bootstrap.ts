@@ -53,6 +53,7 @@ import {
 import {
   SceneCreateTool, SceneOpenTool, SceneSaveTool, SceneInfoTool,
   SceneAnalyzeTool, PrefabCreateTool, PrefabInstantiateTool, PrefabAnalyzeTool,
+  SceneBuildTool
 } from './tools/unity-scene/index.js';
 import {
   AssetFindTool, AssetDependenciesTool, AssetUnusedTool,
@@ -234,6 +235,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new ProjectToolListTool(),
     new ProjectToolInvokeTool(),
     new VerifyChangeTool(),
+    new SceneBuildTool(),
     new EditorInstancesTool(),
     new UnityEditorRouteTool(),
     new UiQueryTool(),
