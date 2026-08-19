@@ -184,3 +184,51 @@ describe('a compile that outlasts the wait', () => {
     expect(payload['nextStep']).toMatch(/Do not rewrite/i);
   });
 });
+
+describe('what the offline verdict says at its root', () => {
+  // The bridged path reports status and counts at the root; this one reported
+  // {mode, compile} and nothing else, so a reader looking for the reason had
+  // to descend into the console entries — and found a log line, not a reason.
+  it('names the failure and counts it', async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: false, compileIssueCount: 7 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, unknown>;
+
+    expect(payload['status']).toBe('failed');
+    expect(payload['reason']).toMatch(/7 issue/);
+    expect((payload['summary'] as { compileIssues: number }).compileIssues).toBe(7);
+    expect(result.isError).toBe(true);
+  });
+
+  it('separates "did not verify" from "verified and failed"', async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: false,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: null, compileIssueCount: 0 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, unknown>;
+
+    expect(payload['status']).toBe('unknown');
+    expect(payload['reason']).toMatch(/NOT verified/);
+    expect(result.isError, 'unverified is not a failed verdict').toBe(false);
+  });
+
+  it('says passed when the compile actually succeeded', async () => {
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, unknown>;
+
+    expect(payload['status']).toBe('passed');
+    expect(result.isError).toBe(false);
+  });
+});

@@ -492,9 +492,26 @@ export class VerifyChangeTool extends CompositeBridgeTool {
         bridgeError: 'Unity bridge not connected',
         allowHeadlessCompile: true,
       });
+      // Same shape as the bridged verdict: the outcome at the root, evidence
+      // underneath. Reported as a bare {mode, compile} document it had no
+      // root-level reason at all, so a reader looking for one descended into
+      // the console entries and surfaced whichever log line came first —
+      // measured, "Mono: successfully reloaded assembly" for a failed compile.
+      const failed = offline.compile.lastSucceeded === false;
+      const issues = Number(offline.compile.compileIssueCount ?? 0);
       return {
-        content: JSON.stringify({ mode: 'offline', compile: offline }, null, 2),
-        isError: offline.compile.lastSucceeded === false,
+        content: JSON.stringify({
+          status: failed ? 'failed' : offline.verified ? 'passed' : 'unknown',
+          mode: 'offline',
+          reason: failed
+            ? `Headless compile failed${issues > 0 ? ` with ${issues} issue(s)` : ''}.`
+            : offline.verified
+              ? undefined
+              : 'Headless compile did not produce a verdict. The change was NOT verified.',
+          summary: { compileIssues: issues },
+          compile: offline,
+        }, null, 2),
+        isError: failed,
       };
     }
 
