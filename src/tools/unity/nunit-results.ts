@@ -54,6 +54,37 @@ export function failedTestNames(xml: string, limit = 20): string[] {
   return names;
 }
 
+export interface FailedTest {
+  readonly name: string;
+  /** The assertion's own message, which is where the reason lives. */
+  readonly message?: string;
+}
+
+/**
+ * Failing cases with the reason each one gives.
+ *
+ * A name alone is not a diagnosis: "StradaBootSmokeTest.TheAssembledSceneBoots"
+ * says a scene did not boot and nothing about why. The reason was already in
+ * the results file — reading it required opening Unity by hand.
+ */
+export function failedTests(xml: string, limit = 20): FailedTest[] {
+  const out: FailedTest[] = [];
+  // Each chunk is one case and everything up to the next one, which is where
+  // that case's <failure><message> sits.
+  const chunks = xml.split('<test-case');
+  for (const chunk of chunks.slice(1)) {
+    if (out.length >= limit) break;
+    const header = /^[^>]*>/.exec(chunk)?.[0] ?? '';
+    if (!/\bresult="(Failed|Error)"/.test(header)) continue;
+    const name = /\bfullname="([^"]*)"/.exec(header)?.[1] ?? /\bname="([^"]*)"/.exec(header)?.[1];
+    if (!name) continue;
+    const raw = /<message>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/message>/.exec(chunk)?.[1];
+    const message = raw?.trim().replace(/\s+/gu, ' ').slice(0, 400);
+    out.push(message ? { name, message } : { name });
+  }
+  return out;
+}
+
 /**
  * Whether a play-mode run counts as a pass.
  *

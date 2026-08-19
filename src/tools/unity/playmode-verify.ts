@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
-import { parseTestRun, failedTestNames, playmodeVerdict } from './nunit-results.js';
+import { parseTestRun, failedTests, playmodeVerdict } from './nunit-results.js';
+import type { FailedTest } from './nunit-results.js';
 
 /**
  * Run the game in play mode and report whether it survived, with no Editor open.
@@ -205,7 +206,7 @@ export class PlaymodeVerifyTool implements ITool {
 
       return {
         content:
-          this.render(outcome, exceptions, failedTestNames(xml), exitCode, verdict.reason) +
+          this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason) +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)),
         isError: !verdict.passed,
       };
@@ -303,7 +304,7 @@ export class PlaymodeVerifyTool implements ITool {
   private render(
     outcome: { result: string; total: number; passed: number; failed: number; skipped: number },
     exceptions: string[],
-    failures: string[],
+    failures: readonly FailedTest[],
     exitCode: number,
     reason: string,
   ): string {
@@ -332,7 +333,11 @@ export class PlaymodeVerifyTool implements ITool {
 
     if (failures.length > 0) {
       lines.push('', 'Failed:');
-      for (const name of failures) lines.push(`  ${name}`);
+      for (const failure of failures) {
+        lines.push(`  ${failure.name}`);
+        // The name says which test; this says what it found.
+        if (failure.message) lines.push(`      ${failure.message}`);
+      }
     }
     if (exceptions.length > 0) {
       lines.push('', 'Exceptions logged during play:');

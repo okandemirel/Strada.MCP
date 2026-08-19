@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTestRun, failedTestNames, playmodeVerdict } from './nunit-results.js';
+import { parseTestRun, failedTestNames, failedTests, playmodeVerdict } from './nunit-results.js';
 
 const run = (attrs: string, cases = ''): string =>
   `<?xml version="1.0" encoding="utf-8"?>\n<test-run id="2" ${attrs}>${cases}</test-run>`;
@@ -89,5 +89,72 @@ describe('the play-mode verdict', () => {
 
   it('fails when no results file was parsed at all', () => {
     expect(playmodeVerdict(null).reason).toBe('no-results');
+  });
+});
+
+describe('the reason a case failed', () => {
+  // Measured 2026-08-20: unity_playmode_verify reported
+  // "StradaBootSmokeTest.TheAssembledSceneBootsWithoutError" and stopped there.
+  // The reason was in the results file the whole time; getting it out meant
+  // running Unity by hand.
+  const xml = `<?xml version="1.0"?>
+<test-run id="2" result="Failed(Child)" total="1" passed="0" failed="1" skipped="0">
+  <test-case id="1002" name="TheAssembledSceneBootsWithoutError"
+             fullname="StradaBootSmokeTest.TheAssembledSceneBootsWithoutError" result="Failed">
+    <failure>
+      <message><![CDATA[GameBootstrapper is in the scene but never finished initializing.
+  Expected: True
+  But was:  False]]></message>
+      <stack-trace><![CDATA[at StradaBootSmokeTest...]]></stack-trace>
+    </failure>
+  </test-case>
+</test-run>`;
+
+  it('carries the assertion message next to the name', () => {
+    const [failure] = failedTests(xml);
+
+    expect(failure!.name).toBe('StradaBootSmokeTest.TheAssembledSceneBootsWithoutError');
+    expect(failure!.message).toContain('never finished initializing');
+  });
+
+  it('collapses the message onto one line so a report stays readable', () => {
+    expect(failedTests(xml)[0]!.message).not.toContain('\n');
+  });
+
+  it('ignores cases that passed', () => {
+    const passing = xml.replace('result="Failed">', 'result="Passed">');
+
+    expect(failedTests(passing)).toHaveLength(0);
+  });
+
+  it('still names a failure that gives no message', () => {
+    const bare = `<test-run><test-case fullname="A.B" result="Failed"></test-case></test-run>`;
+
+    expect(failedTests(bare)).toEqual([{ name: 'A.B' }]);
+  });
+
+  it('does not lend an earlier failure\'s message to a later one', () => {
+    // The document order that matters: a case WITH a message, then one without.
+    // Reading the message from the document rather than from the case makes the
+    // second failure report the first one's reason.
+    const two = `<test-run>
+  <test-case fullname="A.First" result="Failed"><failure><message><![CDATA[first failed]]></message></failure></test-case>
+  <test-case fullname="A.Second" result="Failed"></test-case>
+</test-run>`;
+
+    const failures = failedTests(two);
+    expect(failures[0]!.message).toBe('first failed');
+    expect(failures[1]).toEqual({ name: 'A.Second' });
+  });
+
+  it('does not attribute one case\'s message to the next', () => {
+    const two = `<test-run>
+  <test-case fullname="A.First" result="Passed"></test-case>
+  <test-case fullname="A.Second" result="Failed"><failure><message><![CDATA[second failed]]></message></failure></test-case>
+</test-run>`;
+
+    const failures = failedTests(two);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.message).toBe('second failed');
   });
 });
