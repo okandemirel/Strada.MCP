@@ -4,6 +4,16 @@ export interface ToolContext {
   readOnly: boolean;
   unityBridgeConnected: boolean;
   allowedPaths?: string[];
+  /**
+   * Absolute paths the user named in their own message.
+   *
+   * Read-only authorisation for exactly those files, so a design document the
+   * user pointed at can be read even though it sits outside the project. Kept
+   * separate from allowedPaths on purpose: that one also gates file_write,
+   * file_delete and file_rename, and naming a file to be read is not permission
+   * to overwrite it.
+   */
+  userAuthorizedPaths?: readonly string[];
 }
 
 export interface ToolResult {

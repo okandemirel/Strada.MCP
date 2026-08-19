@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 import { validatePath, isPathAllowed } from '../../security/path-guard.js';
 import { sanitizeOutput } from '../../security/sanitizer.js';
@@ -32,8 +33,19 @@ export class FileReadTool implements ITool {
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     try {
       const { path: filePath, offset, limit } = inputSchema.parse(input);
-      const resolved = validatePath(filePath, context.projectPath);
-      if ((context.allowedPaths ?? []).length > 0 && !isPathAllowed(resolved, context.allowedPaths ?? [])) {
+      // A file the user named themselves may be read wherever it lives. The
+      // authorisation is theirs, it is read-only, and it is exact: naming one
+      // file does not name its folder or its siblings.
+      const named = (context.userAuthorizedPaths ?? []).some(
+        (candidate) => resolve(candidate) === resolve(filePath),
+      );
+
+      const resolved = named ? resolve(filePath) : validatePath(filePath, context.projectPath);
+      if (
+        !named &&
+        (context.allowedPaths ?? []).length > 0 &&
+        !isPathAllowed(resolved, context.allowedPaths ?? [])
+      ) {
         return { content: `Path is outside allowed paths`, isError: true };
       }
       const content = await fs.readFile(resolved, 'utf-8');
