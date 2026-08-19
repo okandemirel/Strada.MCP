@@ -45,7 +45,12 @@ export class SceneBuildTool implements ITool {
           '"type":"Strada.Core.Bootstrap.GameBootstrapper","fields":[' +
           '{"name":"_gameConfig","kind":"reference","reference":"cfg"}]}]}]}\n' +
           'Anything the game spawns at runtime — tiles, enemies, projectiles — belongs in the spec ' +
-          'as an object with a prefabPath and keepInScene: false, not as a scene object.\n\n' +
+          'as an object with a prefabPath and keepInScene: false, not as a scene object.\n' +
+          'A list field takes kind "referenceList" with an ids array. GameBootstrapperConfig._modules ' +
+          'is the one that matters: without it the bootstrapper is wired to a config that starts ' +
+          'nothing. It holds wrapper structs, so name the field inside each element:\n' +
+          '  {"name":"_modules","kind":"referenceList","elementField":"_config",' +
+          '"references":["boardCfg","scoreCfg"]}\n\n' +
           'The scene specification. Shape: { specVersion, scene: {path, mode, addToBuildSettings}, ' +
           'assets: [{id, type, path, fields}], objects: [{id, name, parent, prefabPath, keepInScene, ' +
           'components: [{type, fields}]}] }. ' +
