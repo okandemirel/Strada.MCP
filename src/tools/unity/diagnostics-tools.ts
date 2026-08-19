@@ -63,7 +63,11 @@ const projectToolInvokeSchema = z.object({
 });
 const verifyChangeSchema = z.object({
   recompile: z.boolean().optional().default(true),
-  compileTimeoutMs: z.number().int().min(1000).max(120000).optional().default(30000),
+  // A domain reload in a project with a couple of dozen assemblies routinely
+  // runs past a minute. Measured on Pixel Flow: recompiles landed 50-90s
+  // apart while this wait allowed 30s, so every verify timed out on a
+  // project that compiled cleanly.
+  compileTimeoutMs: z.number().int().min(1000).max(600000).optional().default(180000),
   pollIntervalMs: z.number().int().min(50).max(5000).optional().default(250),
   consoleLimit: z.number().int().min(1).max(500).optional().default(200),
   runTests: z.boolean().optional().default(false),
@@ -502,9 +506,23 @@ export class VerifyChangeTool extends CompositeBridgeTool {
     }
 
     evidence.compile = await waitForCompile(this.client!, parsed.compileTimeoutMs, parsed.pollIntervalMs);
-    if ((evidence.compile as { status?: string }).status === 'timeout') {
+    const wait = evidence.compile as { status?: string; compile?: CompileStatusResult };
+    if (wait.status === 'timeout') {
+      // Unity still working when the clock runs out is not a verdict on the
+      // change: nothing about it is known to be wrong. Reported as a plain
+      // failure it reads as "your code is broken", and the agent rewrites
+      // working code and recompiles — which starts this same clock over.
+      const busy = wait.compile?.isCompiling === true || wait.compile?.isReloading === true;
       return {
-        content: JSON.stringify(evidence.compile, null, 2),
+        content: JSON.stringify({
+          status: 'timeout',
+          reason: busy
+            ? `Unity was still ${wait.compile?.isCompiling ? 'compiling' : 'reloading assemblies'} after ${parsed.compileTimeoutMs}ms. The change was NOT verified, and nothing is known to be wrong with it.`
+            : `Compile status did not settle within ${parsed.compileTimeoutMs}ms. The change was NOT verified.`,
+          nextStep:
+            'Call unity_verify_change again with recompile:false to read the compile already in flight. Do not rewrite the code on the strength of this timeout.',
+          compile: wait.compile ?? {},
+        }, null, 2),
         isError: true,
       };
     }

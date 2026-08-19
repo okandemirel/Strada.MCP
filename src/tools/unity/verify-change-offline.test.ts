@@ -130,3 +130,57 @@ describe('unity_verify_change without a bridge', () => {
     expect(new CompileWaitTool().metadata.requiresBridge).toBe(true);
   });
 });
+
+describe('a compile that outlasts the wait', () => {
+  // Measured on the Pixel Flow run of 2026-08-19: nine module assemblies, and
+  // recompiles landed 50-90s apart while the wait allowed 30s. Every verify
+  // returned status:timeout on a project whose runtime assemblies all built,
+  // and the agent read the timeout as "the change is broken".
+  function bridgeStillCompiling() {
+    return {
+      request: vi.fn(async (method: string) => {
+        if (method === 'editor.recompile') return {};
+        if (method === 'editor.compileStatus') {
+          return { isCompiling: true, isReloading: false, compileIssueCount: 0 };
+        }
+        return {};
+      }),
+    };
+  }
+
+  function connected(): ToolContext {
+    return { ...context(), unityBridgeConnected: true } as ToolContext;
+  }
+
+  it('allows a real domain reload before giving up', () => {
+    // The default has to outlast the thing it waits for.
+    const parsed = (new VerifyChangeTool() as unknown as {
+      schema: { parse(v: unknown): { compileTimeoutMs: number } };
+    }).schema.parse({});
+
+    expect(parsed.compileTimeoutMs).toBeGreaterThanOrEqual(120_000);
+  });
+
+  it('says the change was not verified, rather than that it failed', async () => {
+    const tool = new VerifyChangeTool();
+    tool.setBridgeClient(bridgeStillCompiling() as never);
+
+    const result = await tool.execute({ compileTimeoutMs: 1000, pollIntervalMs: 50 }, connected());
+    const payload = JSON.parse(result.content) as Record<string, string>;
+
+    expect(payload['status']).toBe('timeout');
+    expect(payload['reason']).toMatch(/still compiling/i);
+    expect(payload['reason']).toMatch(/NOT verified/);
+    expect(payload['nextStep']).toMatch(/recompile:false/);
+  });
+
+  it('does not tell the agent to rewrite code it never checked', async () => {
+    const tool = new VerifyChangeTool();
+    tool.setBridgeClient(bridgeStillCompiling() as never);
+
+    const result = await tool.execute({ compileTimeoutMs: 1000, pollIntervalMs: 50 }, connected());
+    const payload = JSON.parse(result.content) as Record<string, string>;
+
+    expect(payload['nextStep']).toMatch(/Do not rewrite/i);
+  });
+});
