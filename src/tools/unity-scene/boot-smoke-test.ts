@@ -168,9 +168,17 @@ public class StradaBootSmokeTest
     {
         yield return SceneManager.LoadSceneAsync(${JSON.stringify(sceneName)}, LoadSceneMode.Single);
 
-        // Awake, Start and the bootstrapper's own initialization span several
-        // frames; asserting on the first one reads a half-built world.
-        for (var frame = 0; frame < 10; frame++) yield return null;
+        // Wait for the thing being asserted, not for a number of frames.
+        // Measured: a scene with eleven modules initializes well past frame ten,
+        // so a fixed count failed a game that boots correctly — and it would
+        // have failed later, or on a slower machine, for a scene with fewer.
+        var bootDeadline = Time.realtimeSinceStartup + 10f;
+        while (Time.realtimeSinceStartup < bootDeadline)
+        {
+            var probe = Object.FindFirstObjectByType<GameBootstrapper>();
+            if (probe != null && probe.IsInitialized) break;
+            yield return null;
+        }
 
         var bootstrapper = Object.FindFirstObjectByType<GameBootstrapper>();
         Assert.IsNotNull(
@@ -179,8 +187,9 @@ public class StradaBootSmokeTest
 
         Assert.IsTrue(
             bootstrapper.IsInitialized,
-            "GameBootstrapper is in the scene but never finished initializing. "
-            + "Its _gameConfig is usually unassigned, or a module threw while starting.");
+            "GameBootstrapper is in the scene but never finished initializing "
+            + "within 10 seconds. Its _gameConfig is usually unassigned, or a module "
+            + "threw while starting.");
 
         Assert.IsNotNull(
             GameBootstrapper.Services,

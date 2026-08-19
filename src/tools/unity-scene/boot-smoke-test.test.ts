@@ -44,7 +44,10 @@ describe('the generated boot check', () => {
   it('waits past the first frame before asserting', () => {
     // Initialization spans frames; asserting immediately reads a half-built
     // world and fails a game that was fine.
-    expect(buildBootSmokeTest('Main').source).toMatch(/for \(var frame = 0; frame < \d+/);
+    const source = buildBootSmokeTest('Main').source;
+
+    expect(source).toContain('yield return null;');
+    expect(source).toMatch(/while \(Time\.realtimeSinceStartup < bootDeadline\)/);
   });
 
   it('fails on an exception no assertion was watching', () => {
@@ -237,5 +240,29 @@ describe("recording a game whose screen is UI", () => {
 
     expect(finallyBlock).toContain("RenderMode.ScreenSpaceOverlay");
     expect(finallyBlock).toContain("canvas.worldCamera = null;");
+  });
+});
+
+describe('how long the boot test waits', () => {
+  // Measured 2026-08-20 on a scene assembled from a real GDD run: eleven
+  // modules, every reference correct on disk, and the generated test failed —
+  // initialization had simply not finished by frame ten. Re-run with a wait on
+  // the condition, the same scene passed. A false red, and it would have been
+  // read as "the game does not boot".
+  const { source } = buildBootSmokeTest('Main');
+
+  it('waits for initialization rather than for a frame count', () => {
+    expect(source).not.toContain('frame < 10');
+    expect(source).toContain('IsInitialized');
+    expect(source).toContain('realtimeSinceStartup');
+  });
+
+  it('gives up eventually instead of hanging the run', () => {
+    expect(source).toContain('bootDeadline');
+    expect(source).toContain('+ 10f');
+  });
+
+  it('says how long it waited when it gives up', () => {
+    expect(source).toContain('within 10 seconds');
   });
 });
