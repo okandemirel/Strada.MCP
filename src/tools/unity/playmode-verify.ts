@@ -207,7 +207,7 @@ export class PlaymodeVerifyTool implements ITool {
 
       return {
         content:
-          this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason) +
+          this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason, log) +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)),
         isError: !verdict.passed,
       };
@@ -284,11 +284,23 @@ export class PlaymodeVerifyTool implements ITool {
     return [...seen];
   }
 
+  /** Compile errors visible in a Unity log, deduplicated on the message. */
+  private compileErrorsIn(log: string): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const line of log.split('\n')) {
+      if (!line.includes('error CS')) continue;
+      const key = line.replace(/^.*?\((\d+),(\d+)\):\s*/u, '').trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(line.trim());
+      if (out.length >= 10) break;
+    }
+    return out;
+  }
+
   private renderNoResults(exitCode: number, log: string): string {
-    const compileErrors = log
-      .split('\n')
-      .filter((l) => l.includes('error CS'))
-      .slice(0, 10);
+    const compileErrors = this.compileErrorsIn(log);
     if (compileErrors.length > 0) {
       return (
         `PlayMode tests never ran (Unity exit ${exitCode}): the project does not compile, so ` +
@@ -308,14 +320,28 @@ export class PlaymodeVerifyTool implements ITool {
     failures: readonly FailedTest[],
     exitCode: number,
     reason: string,
+    log: string,
   ): string {
     const lines: string[] = [];
 
     if (reason === 'nothing-ran') {
-      lines.push(
-        'PlayMode verification FAILED: no test executed. An empty run is not a pass — ' +
-        'the project has no PlayMode tests, or the filter matched nothing.',
-      );
+      // A results file with zero tests looks the same whether the project has
+      // no tests or simply failed to build them. Measured: an agent called this
+      // thirteen times against a project that did not compile and was told each
+      // time to look for a missing test assembly.
+      const compileErrors = this.compileErrorsIn(log);
+      if (compileErrors.length > 0) {
+        lines.push(
+          'PlayMode verification FAILED: no test executed, because the project does not ' +
+          'compile — the test assembly was never built. Fix these first:',
+          ...compileErrors.map((e) => `  ${e}`),
+        );
+      } else {
+        lines.push(
+          'PlayMode verification FAILED: no test executed. An empty run is not a pass — ' +
+          'the project has no PlayMode tests, or the filter matched nothing.',
+        );
+      }
     } else if (reason === 'tests-failed') {
       lines.push(`PlayMode verification FAILED: ${outcome.failed} of ${outcome.total} tests failed.`);
     } else if (reason === 'threw') {
