@@ -30,13 +30,17 @@ export class CSharpSymbolSearchTool implements ITool {
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const start = performance.now();
     const parsed = symbolSearchSchema.parse(input);
-    const matches = await searchSymbols(context.projectPath, parsed);
+    const { matches, skippedFiles } = await searchSymbols(context.projectPath, parsed);
     return {
       content: JSON.stringify({
         backend: 'tree-sitter',
         authority: 'inferred',
         query: parsed.query,
         count: matches.length,
+        // Never a silent cap: a file the parser could not read is one the
+        // answer does not cover, and saying so is the difference between
+        // "no matches" and "no matches in what I could read".
+        ...(skippedFiles > 0 ? { skippedFiles } : {}),
         matches,
       }, null, 2),
       metadata: { executionTimeMs: Math.round(performance.now() - start) },

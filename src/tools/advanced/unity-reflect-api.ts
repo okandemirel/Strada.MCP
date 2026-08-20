@@ -76,7 +76,7 @@ export class UnityReflectApiTool implements ITool {
     }
 
     const query = parsed.typeName ?? parsed.pattern!;
-    const matches = await searchSymbols(context.projectPath, {
+    const { matches } = await searchSymbols(context.projectPath, {
       query,
       limit: parsed.limit,
       exact: Boolean(parsed.typeName),

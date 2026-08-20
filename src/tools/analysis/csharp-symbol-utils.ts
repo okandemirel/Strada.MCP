@@ -81,17 +81,28 @@ export async function searchSymbols(
     limit?: number;
     exact?: boolean;
   },
-): Promise<CSharpSymbolMatch[]> {
+): Promise<{ matches: CSharpSymbolMatch[]; skippedFiles: number }> {
   const files = await collectCSharpFiles(projectPath);
   const results: CSharpSymbolMatch[] = [];
   const normalizedQuery = (options.query ?? '').trim();
   const lowerQuery = normalizedQuery.toLowerCase();
   const allowedKinds = new Set((options.kinds ?? []).map((kind) => kind.toLowerCase()));
 
+  let unreadable = 0;
   for (const relativePath of files) {
     const absolutePath = validatePath(relativePath, projectPath);
     const source = await fs.readFile(absolutePath, 'utf8');
-    const nodes = parser.parse(source);
+    // One file the parser cannot handle used to fail the entire search —
+    // measured, a 33KB source threw a bare "Invalid argument" and an agent
+    // looking for a class it had just written got nothing at all. Skip it and
+    // keep going; the count is reported so the omission is not silent.
+    let nodes;
+    try {
+      nodes = parser.parse(source);
+    } catch {
+      unreadable++;
+      continue;
+    }
     const lines = source.split(/\r?\n/);
 
     walkSymbols(nodes, [], null, (node, namespaceName, parentChain) => {
@@ -127,7 +138,7 @@ export async function searchSymbols(
     });
   }
 
-  return results.slice(0, options.limit ?? 100);
+  return { matches: results.slice(0, options.limit ?? 100), skippedFiles: unreadable };
 }
 
 export async function findReferences(

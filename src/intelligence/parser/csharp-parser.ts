@@ -88,7 +88,7 @@ export class CSharpParser {
   parse(code: string): CSharpNode[] {
     if (!code.trim()) return [];
 
-    const tree = this.parser.parse(code);
+    const tree = this.parser.parse(readerFor(code));
     return this.visitChildren(tree.rootNode as TSNode);
   }
 
@@ -465,4 +465,20 @@ export class CSharpParser {
     }
     return null;
   }
+}
+
+/**
+ * Feed tree-sitter in chunks instead of one string.
+ *
+ * The Node binding rejects a source string above 32KB outright — measured on
+ * 2026-08-20: every C# file up to 32515 characters parsed, every file from
+ * 33159 up threw a bare "Invalid argument", and eleven of a project's 380
+ * files were over the line. The callback form has no such limit.
+ *
+ * The thrown error named neither the file nor the reason, and one unparsable
+ * file failed the whole symbol search, so an agent asking for a class it had
+ * just written got "Invalid argument" and nothing else.
+ */
+function readerFor(code: string): (index: number) => string | null {
+  return (index: number) => (index < code.length ? code.slice(index, index + 8192) : null);
 }

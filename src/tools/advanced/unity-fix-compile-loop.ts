@@ -69,7 +69,7 @@ export class UnityFixCompileLoopTool implements ITool {
     const recommendations = await Promise.all(relevantIssues.slice(0, 5).map(async (issue) => {
       const symbolQuery = extractLikelySymbol(issue.message ?? '');
       const matches = symbolQuery
-        ? await searchSymbols(context.projectPath, { query: symbolQuery, limit: 5 })
+        ? (await searchSymbols(context.projectPath, { query: symbolQuery, limit: 5 })).matches
         : [];
       return {
         issue,
