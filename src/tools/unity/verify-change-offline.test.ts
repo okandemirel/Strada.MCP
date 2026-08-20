@@ -232,3 +232,48 @@ describe('what the offline verdict says at its root', () => {
     expect(result.isError).toBe(false);
   });
 });
+
+describe("issues counted but no failure flag", () => {
+  // Measured live on 2026-08-20, from the tool's own output:
+  //   {"status":"passed","mode":"offline","summary":{"compileIssues":78}}
+  // isError was false. The verdict keyed on lastSucceeded alone, and a compile
+  // that had counted seventy-eight problems reported success.
+  it("counts issues as a failure even when the flag says otherwise", async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: true, compileIssueCount: 78 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, unknown>;
+
+    expect(payload['status'], 'reported a pass with 78 issues').toBe('failed');
+    expect(payload['reason']).toMatch(/78 issue/);
+    expect(result.isError).toBe(true);
+  });
+
+  it("treats an unset flag with issues as a failure too", async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: null, compileIssueCount: 3 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+
+    expect(JSON.parse(result.content)['status']).toBe('failed');
+    expect(result.isError).toBe(true);
+  });
+
+  it("still passes a clean compile", async () => {
+    const result = await new VerifyChangeTool().execute({}, context());
+
+    expect(JSON.parse(result.content)['status']).toBe('passed');
+    expect(result.isError).toBe(false);
+  });
+});

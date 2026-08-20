@@ -497,8 +497,12 @@ export class VerifyChangeTool extends CompositeBridgeTool {
       // root-level reason at all, so a reader looking for one descended into
       // the console entries and surfaced whichever log line came first —
       // measured, "Mono: successfully reloaded assembly" for a failed compile.
-      const failed = offline.compile.lastSucceeded === false;
       const issues = Number(offline.compile.compileIssueCount ?? 0);
+      // Counted issues are a failure whether or not the run set a success flag.
+      // Measured live on 2026-08-20: a compile reporting 78 issues came back
+      // status "passed", isError false, because only lastSucceeded was
+      // consulted — the very shape of false green this path exists to prevent.
+      const failed = offline.compile.lastSucceeded === false || issues > 0;
       return {
         content: JSON.stringify({
           status: failed ? 'failed' : offline.verified ? 'passed' : 'unknown',
