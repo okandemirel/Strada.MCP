@@ -28,6 +28,31 @@ export interface ConsoleLogEntry {
   timestamp?: number;
 }
 
+/**
+ * One entry per distinct problem.
+ *
+ * Compile errors cascade: a type that does not exist is reported once at every
+ * use. A caller given the first twenty lines can receive twenty restatements of
+ * one cause and no sight of the other nineteen. Keyed on the message with the
+ * file and line stripped, because the same fault at a different line is the
+ * same fault.
+ */
+export function distinctCompileEntries(entries: readonly ConsoleLogEntry[]): ConsoleLogEntry[] {
+  const seen = new Set<string>();
+  const out: ConsoleLogEntry[] = [];
+  for (const entry of entries) {
+    const key = (entry.message ?? '')
+      .replace(/^.*?\((\d+),(\d+)\):\s*/u, '')
+      .replace(/\s+/gu, ' ')
+      .trim()
+      .toLowerCase();
+    if (key === '' || seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
 export interface ConsoleSnapshotPayload {
   source: DiagnosticsSource;
   bridgeMethod: 'editor.getConsoleLogs';
@@ -231,7 +256,11 @@ export async function getStaticCompileStatus(
                 'Compiled with an editor that does not match ProjectVersion.txt; ' +
                 'opening a project with a newer Unity upgrades it in place.',
             }),
-        entries: batchSnapshot.entries.slice(0, 20),
+        distinctIssues: distinctCompileEntries(batchSnapshot.entries).length,
+        // Distinct causes, not the first twenty lines. One missing interface
+        // produces an error in every file that uses it, so a raw slice can
+        // spend the whole budget restating a single root cause.
+        entries: distinctCompileEntries(batchSnapshot.entries).slice(0, 20),
       },
     };
   }
