@@ -27,7 +27,8 @@ export class SceneBuildTool implements ITool {
     'ScriptableObject assets, GameObjects and components, assign serialized field references ' +
     '(including the GameBootstrapper config), save the scene, and verify on disk that every ' +
     'reference is a real link rather than a null that looks like one. Returns what was created, ' +
-    'what was assigned, and any problem found.';
+    'what was assigned, and any problem found. It locates the Unity editor matching the ' +
+    'project itself — you do not need to search the filesystem for one.';
 
   readonly inputSchema = {
     type: 'object',

@@ -68,3 +68,14 @@ describe('unity_scene_build', () => {
     expect(props['spec']?.description).toMatch(/objects/);
   });
 });
+
+describe('what the description tells an agent it need not do', () => {
+  // Measured on the run of 2026-08-20: `which unity` found nothing, so the
+  // agent ran `find /Users ...` — 45 minutes, the whole run, and no files
+  // written. Both headless tools already resolve the editor from the
+  // project's own ProjectVersion.txt; nothing said so.
+  it('says it finds the editor itself', () => {
+    expect(new SceneBuildTool().description).toMatch(/locates the Unity editor/i);
+    expect(new SceneBuildTool().description).toMatch(/not need to search the filesystem/i);
+  });
+});

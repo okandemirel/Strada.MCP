@@ -69,7 +69,8 @@ export class PlaymodeVerifyTool implements ITool {
     'verdict backed by the NUnit results: how many tests actually executed, which failed, and ' +
     'any exception thrown while play mode was running. Use after assembling a scene to check ' +
     'that the game boots and runs, not only that it compiles. A run in which no test executed ' +
-    'is reported as a failure, not a pass.';
+    'is reported as a failure, not a pass. It locates the Unity editor matching the project ' +
+    'itself — you do not need to search the filesystem for one.';
 
   readonly inputSchema = {
     type: 'object',
