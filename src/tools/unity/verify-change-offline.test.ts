@@ -202,7 +202,7 @@ describe('what the offline verdict says at its root', () => {
     const payload = JSON.parse(result.content) as Record<string, unknown>;
 
     expect(payload['status']).toBe('failed');
-    expect(payload['reason']).toMatch(/7 issue/);
+    expect(payload['reason']).toMatch(/7 compile entries/);
     expect((payload['summary'] as { compileIssues: number }).compileIssues).toBe(7);
     expect(result.isError).toBe(true);
   });
@@ -244,6 +244,7 @@ describe("issues counted but no failure flag", () => {
       bridgeMethod: 'editor.compileStatus',
       verified: true,
       compile: { isCompiling: false, isReloading: false, lastSucceeded: true, compileIssueCount: 78 },
+      diagnostics: { errorCount: 78, warningCount: 0 },
       capturedAt: 1,
     });
 
@@ -251,7 +252,7 @@ describe("issues counted but no failure flag", () => {
     const payload = JSON.parse(result.content) as Record<string, unknown>;
 
     expect(payload['status'], 'reported a pass with 78 issues').toBe('failed');
-    expect(payload['reason']).toMatch(/78 issue/);
+    expect(payload['reason']).toMatch(/78 error/);
     expect(result.isError).toBe(true);
   });
 
@@ -261,6 +262,7 @@ describe("issues counted but no failure flag", () => {
       bridgeMethod: 'editor.compileStatus',
       verified: true,
       compile: { isCompiling: false, isReloading: false, lastSucceeded: null, compileIssueCount: 3 },
+      diagnostics: { errorCount: 3, warningCount: 0 },
       capturedAt: 1,
     });
 
@@ -275,5 +277,63 @@ describe("issues counted but no failure flag", () => {
 
     expect(JSON.parse(result.content)['status']).toBe('passed');
     expect(result.isError).toBe(false);
+  });
+});
+
+describe("warnings are not failures", () => {
+  // Measured 2026-08-20: compileIssueCount is compile-related entries, errors
+  // and warnings together. The delivered project builds with zero errors and
+  // twenty-three warnings; a rule that failed on the issue total called a
+  // clean build broken, and would have done so for every build with a warning.
+  it("passes a build whose only issues are warnings", async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: true, compileIssueCount: 23 },
+      diagnostics: { errorCount: 0, warningCount: 23 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, unknown>;
+
+    expect(payload['status'], 'called a warning a failure').toBe('passed');
+    expect(result.isError).toBe(false);
+  });
+
+  it("still reports how many entries there were", async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: true, compileIssueCount: 23 },
+      diagnostics: { errorCount: 0, warningCount: 23 },
+      capturedAt: 1,
+    });
+
+    const summary = (JSON.parse((await new VerifyChangeTool().execute({}, context())).content) as {
+      summary: { compileErrors: number; compileIssues: number };
+    }).summary;
+
+    expect(summary.compileErrors).toBe(0);
+    expect(summary.compileIssues).toBe(23);
+  });
+
+  it("fails on errors even when the run flag says it succeeded", async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: true, compileIssueCount: 90 },
+      diagnostics: { errorCount: 12, warningCount: 78 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+
+    expect(JSON.parse(result.content)['status']).toBe('failed');
+    expect(JSON.parse(result.content)['reason']).toMatch(/12 error/);
+    expect(result.isError).toBe(true);
   });
 });

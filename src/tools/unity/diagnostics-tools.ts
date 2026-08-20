@@ -498,21 +498,30 @@ export class VerifyChangeTool extends CompositeBridgeTool {
       // the console entries and surfaced whichever log line came first —
       // measured, "Mono: successfully reloaded assembly" for a failed compile.
       const issues = Number(offline.compile.compileIssueCount ?? 0);
-      // Counted issues are a failure whether or not the run set a success flag.
-      // Measured live on 2026-08-20: a compile reporting 78 issues came back
-      // status "passed", isError false, because only lastSucceeded was
-      // consulted — the very shape of false green this path exists to prevent.
-      const failed = offline.compile.lastSucceeded === false || issues > 0;
+      // compileIssueCount is compile-related entries — errors AND warnings.
+      // Errors decide the verdict; warnings are reported and do not fail a
+      // build. Measured 2026-08-20: the delivered project compiles with zero
+      // errors and twenty-three warnings, and counting issues would have
+      // called it broken forever.
+      const errorCount = Number(
+        (offline.diagnostics as { errorCount?: unknown } | undefined)?.errorCount ?? Number.NaN,
+      );
+      const failed = Number.isFinite(errorCount)
+        ? errorCount > 0
+        // No error breakdown available: fall back to the run's own flag rather
+        // than to the issue total, which would fail on a warning.
+        : offline.compile.lastSucceeded === false;
       return {
         content: JSON.stringify({
           status: failed ? 'failed' : offline.verified ? 'passed' : 'unknown',
           mode: 'offline',
           reason: failed
-            ? `Headless compile failed${issues > 0 ? ` with ${issues} issue(s)` : ''}.`
+            ? `Headless compile failed${Number.isFinite(errorCount) ? ` with ${errorCount} error(s)` : ''}` +
+              `${issues > 0 ? ` (${issues} compile entries including warnings)` : ''}.`
             : offline.verified
               ? undefined
               : 'Headless compile did not produce a verdict. The change was NOT verified.',
-          summary: { compileIssues: issues },
+          summary: { compileErrors: Number.isFinite(errorCount) ? errorCount : null, compileIssues: issues },
           compile: offline,
         }, null, 2),
         isError: failed,
