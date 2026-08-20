@@ -18,7 +18,12 @@ const symbolSearchSchema = z.object({
 export class CSharpSymbolSearchTool implements ITool {
   readonly name = 'csharp_symbol_search';
   readonly description =
-    'Search project C# symbols using tree-sitter parsing across classes, structs, interfaces, methods, fields, and properties';
+    'Find where a C# type or member is declared, by name, across the project — classes, structs, ' +
+    'interfaces, enums, methods, fields and properties. Use it BEFORE writing a new type, to see ' +
+    'whether it already exists somewhere else, and whenever the compiler says a type or member is ' +
+    'already defined (CS0101, CS0111), to find every declaration rather than guessing which file ' +
+    'holds it. Searching by name beats guessing a path: a type does not have to live in the folder ' +
+    'you expect.';
   readonly inputSchema = zodToJsonSchema(symbolSearchSchema);
   readonly metadata: ToolMetadata = {
     category: 'analysis',
