@@ -519,7 +519,13 @@ export class VerifyChangeTool extends CompositeBridgeTool {
             ? `Headless compile failed${Number.isFinite(errorCount) ? ` with ${errorCount} error(s)` : ''}` +
               `${issues > 0 ? ` (${issues} compile entries including warnings)` : ''}.`
             : offline.verified
-              ? undefined
+              // A pass here covers the runtime assemblies only. Test assemblies
+              // carry UNITY_INCLUDE_TESTS and are not built by a plain batch
+              // compile, so "zero errors" and "the tests can run" are different
+              // claims. Measured 2026-08-20: this reported zero errors while
+              // unity_playmode_verify reported the project did not compile —
+              // both true, about different assemblies.
+              ? 'Runtime assemblies compile. Test assemblies are NOT built by this check — run unity_playmode_verify to compile and run them.'
               : 'Headless compile did not produce a verdict. The change was NOT verified.',
           summary: { compileErrors: Number.isFinite(errorCount) ? errorCount : null, compileIssues: issues },
           compile: offline,

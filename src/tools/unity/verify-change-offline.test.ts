@@ -337,3 +337,36 @@ describe("warnings are not failures", () => {
     expect(result.isError).toBe(true);
   });
 });
+
+describe("what a passing compile does not cover", () => {
+  // Measured 2026-08-20: unity_verify_change reported zero compile errors
+  // while unity_playmode_verify reported the project did not compile. Both
+  // were true — of different assemblies. Test assemblies carry
+  // UNITY_INCLUDE_TESTS and a plain batch compile does not build them, so an
+  // agent reading "passed" can believe its tests are fine when they do not
+  // build at all.
+  it("says test assemblies are not part of the verdict", async () => {
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, string>;
+
+    expect(payload['status']).toBe('passed');
+    expect(payload['reason']).toMatch(/Test assemblies are NOT built/i);
+    expect(payload['reason']).toMatch(/unity_playmode_verify/);
+  });
+
+  it("does not claim that on a failed compile", async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: false, compileIssueCount: 5 },
+      diagnostics: { errorCount: 5, warningCount: 0 },
+      capturedAt: 1,
+    });
+
+    const payload = JSON.parse((await new VerifyChangeTool().execute({}, context())).content) as Record<string, string>;
+
+    expect(payload['reason']).toMatch(/compile failed/i);
+    expect(payload['reason']).not.toMatch(/Test assemblies/i);
+  });
+});
