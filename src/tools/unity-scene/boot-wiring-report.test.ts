@@ -46,4 +46,22 @@ describe('the boot smoke test reports what the container holds', () => {
 
     expect(body).not.toContain('Assert.');
   });
+
+  it('asks the framework instead of searching the scene', () => {
+    // Strada.Core calls FindFirstObjectByType zero times in its entire runtime.
+    // A check that scans the scene is working outside the framework it checks,
+    // and it can find a bootstrapper that never initialized.
+    const code = source.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+
+    expect(code).not.toContain('FindFirstObjectByType');
+    expect(code).not.toContain('FindObjectOfType');
+    expect(code).toContain('GameBootstrapper.Services != null');
+  });
+
+  it('names what each missing static costs the game', () => {
+    expect(source).toContain('GameBootstrapper.Container');
+    expect(source).toContain('every [Inject] field will be null');
+    expect(source).toContain('GameBootstrapper.Systems');
+    expect(source).toContain("OnUpdate will ever run");
+  });
 });

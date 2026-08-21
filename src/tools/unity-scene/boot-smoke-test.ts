@@ -175,29 +175,35 @@ public class StradaBootSmokeTest
         // Measured: a scene with eleven modules initializes well past frame ten,
         // so a fixed count failed a game that boots correctly — and it would
         // have failed later, or on a slower machine, for a scene with fewer.
+        // Ask the framework, do not search the scene. GameBootstrapper assigns
+        // Container/Services/World/Systems immediately after it finishes
+        // initializing and clears them on shutdown, so a non-null static IS the
+        // signal — and a stronger one than finding the object, which can turn up
+        // a bootstrapper that never initialized. Strada.Core itself calls
+        // FindFirstObjectByType exactly zero times; a check that scans the scene
+        // is working outside the framework it is meant to be checking.
         var bootDeadline = Time.realtimeSinceStartup + 10f;
         while (Time.realtimeSinceStartup < bootDeadline)
         {
-            var probe = Object.FindFirstObjectByType<GameBootstrapper>();
-            if (probe != null && probe.IsInitialized) break;
+            if (GameBootstrapper.Services != null) break;
             yield return null;
         }
 
-        var bootstrapper = Object.FindFirstObjectByType<GameBootstrapper>();
-        Assert.IsNotNull(
-            bootstrapper,
-            "The scene loaded but holds no GameBootstrapper, so nothing starts the modules.");
-
-        Assert.IsTrue(
-            bootstrapper.IsInitialized,
-            "GameBootstrapper is in the scene but never finished initializing "
-            + "within 10 seconds. Its _gameConfig is usually unassigned, or a module "
-            + "threw while starting.");
-
         Assert.IsNotNull(
             GameBootstrapper.Services,
-            "The bootstrapper initialized without publishing a service locator, "
-            + "so nothing can resolve a service at runtime.");
+            "No GameBootstrapper finished initializing within 10 seconds. Either the scene holds "
+            + "none, or the one it holds never got through Initialize — its _gameConfig is usually "
+            + "unassigned, or a module threw while starting.");
+
+        Assert.IsNotNull(
+            GameBootstrapper.Container,
+            "The bootstrapper initialized without publishing a container, so no dependency can be "
+            + "resolved and every [Inject] field will be null.");
+
+        Assert.IsNotNull(
+            GameBootstrapper.Systems,
+            "The bootstrapper initialized without publishing a SystemRunner, so no system's "
+            + "OnUpdate will ever run.");
 
         ReportInjectionWiring();
 

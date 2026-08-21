@@ -36,8 +36,9 @@ describe('the generated boot check', () => {
     // point: it is pinned to the real contract, not to a guess about it.
     const { source } = buildBootSmokeTest('Main');
 
-    expect(source).toContain('bootstrapper.IsInitialized');
     expect(source).toContain('GameBootstrapper.Services');
+    expect(source).toContain('GameBootstrapper.Container');
+    expect(source).toContain('GameBootstrapper.Systems');
     expect(source).toContain('using Strada.Core.Bootstrap;');
   });
 
@@ -122,7 +123,7 @@ describe('the recording it can do', () => {
     expect(source).not.toContain('camera.Render()');
     expect(source).toContain('Recording omitted');
     expect(source).toContain('[UnityTest]');
-    expect(source).toContain('bootstrapper.IsInitialized');
+    expect(source).toContain('GameBootstrapper.Services');
   });
 
   it('captures nothing unless the harness asks', () => {
@@ -252,8 +253,12 @@ describe('how long the boot test waits', () => {
   const { source } = buildBootSmokeTest('Main');
 
   it('waits for initialization rather than for a frame count', () => {
+    // The wait condition moved from probing the scene for an initialized
+    // bootstrapper to asking GameBootstrapper.Services, which the framework
+    // assigns at the moment initialization completes. Same fact, and it cannot
+    // match a bootstrapper that never initialized.
     expect(source).not.toContain('frame < 10');
-    expect(source).toContain('IsInitialized');
+    expect(source).toContain('GameBootstrapper.Services != null');
     expect(source).toContain('realtimeSinceStartup');
   });
 
