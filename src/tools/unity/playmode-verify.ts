@@ -215,10 +215,8 @@ export class PlaymodeVerifyTool implements ITool {
       const verdict = playmodeVerdict(outcome, exceptions);
 
       // A test assembly that does not compile is not reported as a failure —
-      // Unity simply leaves it out, and the tests that DID build pass. Measured
-      // 2026-08-21: the same project ran 26 tests at 12:58 and 2 at 13:26, with
-      // nothing in between saying twenty-four had stopped running. "2 of 2
-      // passed" is the most dangerous sentence this tool can print.
+      // Unity leaves it out and the tests that DID build pass. See
+      // playmodeResultShape for what this covers and what it does not.
       const shape = playmodeResultShape(verdict.passed, this.compileErrorsIn(log));
 
       return {
@@ -285,7 +283,14 @@ export class PlaymodeVerifyTool implements ITool {
   private playModeExceptions(log: string): string[] {
     const seen = new Set<string>();
     for (const line of log.split('\n')) {
-      if (!/\b\w*Exception\b/.test(line)) continue;
+      // An exception REPORT names a type and then says something:
+      // "NullReferenceException: Object reference not set...". A stack frame
+      // merely mentions one, and Unity's own runner has a method literally
+      // called CaptureException. Measured 2026-08-21: a run that threw handed
+      // back "UnityLogCheckDelegatingCommand:CaptureException (at .../Library/
+      // PackageCache/...)" as the whole of its evidence — a frame from the test
+      // framework, saying nothing about what the game did.
+      if (!/\w*Exception\s*:\s*\S/.test(line)) continue;
       // The runner reports expected exceptions from LogAssert cases too; those
       // carry the test-runner prefix and are not the game misbehaving.
       if (line.includes('UnityEngine.TestTools')) continue;
