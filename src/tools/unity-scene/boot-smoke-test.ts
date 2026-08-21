@@ -239,9 +239,9 @@ ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recor
         // in silence here left a run whose every [Inject] was null looking
         // exactly like a run with nothing to say.
         if (services == null)
-            Debug.Log("[StradaWiring] GameBootstrapper.Services is null - nothing can resolve, every [Inject] field will be null");
+            TestContext.Out.WriteLine("[StradaWiring] GameBootstrapper.Services is null - nothing can resolve, every [Inject] field will be null");
         if (runner == null)
-            Debug.Log("[StradaWiring] GameBootstrapper.Systems is null - no OnUpdate will ever run");
+            TestContext.Out.WriteLine("[StradaWiring] GameBootstrapper.Systems is null - no OnUpdate will ever run");
         if (services == null || runner == null) return;
 
         var systems = new List<object>();
@@ -250,7 +250,7 @@ ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recor
         {
             // An empty runner means nothing ticks. Without this line the loop
             // below simply produces no output, which reads as "all fine".
-            Debug.Log("[StradaWiring] the runner holds no systems - nothing will tick");
+            TestContext.Out.WriteLine("[StradaWiring] the runner holds no systems - nothing will tick");
             return;
         }
 
@@ -269,7 +269,7 @@ ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recor
                 if (System.Attribute.IsDefined(prop, typeof(InjectAttribute)))
                     parts.Add(Describe(services, prop.PropertyType));
 
-            Debug.Log(parts.Count == 0
+            TestContext.Out.WriteLine(parts.Count == 0
                 ? $"[StradaWiring] {type.Name}: nothing injected"
                 : $"[StradaWiring] {type.Name}: {string.Join(", ", parts)}");
         }

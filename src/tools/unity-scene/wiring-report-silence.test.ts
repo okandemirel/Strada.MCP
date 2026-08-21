@@ -37,6 +37,21 @@ describe('the wiring report speaks when the wiring is broken', () => {
     expect(body).toMatch(/no systems|nothing registered|GetAllSystems\(\)[^;]*Count|systemCount/iu);
   });
 
+  it('writes where NUnit records it, not where LogAssert trips over it', () => {
+    // Two failures, one cause. Debug.Log does not reach the NUnit <output>
+    // node that Strada.MCP reads back, so the report was invisible in the
+    // results file; and the generated test ends with
+    // LogAssert.NoUnexpectedReceived(), which treated the report's own lines as
+    // unexpected output and failed the boot check on them (run 37, 22:59:
+    // "Unhandled log message: '[Log] [StradaWiring] PigSystem: nothing
+    // injected'"). TestContext.Out.WriteLine lands in the results file and is
+    // invisible to LogAssert.
+    expect(body, 'the report still logs through the channel LogAssert watches').not.toContain(
+      'Debug.Log',
+    );
+    expect(body).toContain('TestContext.Out.WriteLine');
+  });
+
   it('still only reports, never asserts', () => {
     // Strada.Core permits a null injection by design; this is evidence, not a
     // verdict.
