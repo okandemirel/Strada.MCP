@@ -64,6 +64,21 @@ export function buildPlaymodeArgs(options: {
   return args;
 }
 
+/**
+ * What a count is a count of.
+ *
+ * Measured 2026-08-21, run 37: the same project reported 33 tests, then 44,
+ * then 33, then 1, and every verdict said only "N of M tests failed". The
+ * counts moved because the caller was passing different testFilters — but a
+ * filtered run and a suite that silently lost an assembly produce the same
+ * sentence, and the agent has no way to tell which it is looking at.
+ */
+export function describeRunScope(filter: string | undefined): string {
+  const trimmed = filter?.trim();
+  if (!trimmed) return ' (unfiltered — the whole PlayMode suite)';
+  return ` (filter: ${trimmed} — a subset, not the whole suite)`;
+}
+
 export class PlaymodeVerifyTool implements ITool {
   readonly name = 'unity_playmode_verify';
   readonly description =
@@ -222,7 +237,7 @@ export class PlaymodeVerifyTool implements ITool {
 
       return {
         content:
-          this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason, log) +
+          this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason, log, typeof input['testFilter'] === 'string' ? input['testFilter'] : undefined) +
           shape.suffix +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)),
         isError: shape.isError,
@@ -344,6 +359,7 @@ export class PlaymodeVerifyTool implements ITool {
     exitCode: number,
     reason: string,
     log: string,
+    filter?: string,
   ): string {
     const lines: string[] = [];
 
@@ -366,7 +382,10 @@ export class PlaymodeVerifyTool implements ITool {
         );
       }
     } else if (reason === 'tests-failed') {
-      lines.push(`PlayMode verification FAILED: ${outcome.failed} of ${outcome.total} tests failed.`);
+      lines.push(
+        `PlayMode verification FAILED: ${outcome.failed} of ${outcome.total} tests failed` +
+        `${describeRunScope(filter)}.`,
+      );
     } else if (reason === 'threw') {
       lines.push(
         `PlayMode tests all passed, but the game threw while running. ` +
