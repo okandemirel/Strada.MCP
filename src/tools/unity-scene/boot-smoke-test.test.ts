@@ -265,4 +265,42 @@ describe('how long the boot test waits', () => {
   it('says how long it waited when it gives up', () => {
     expect(source).toContain('within 10 seconds');
   });
+
+  it("keeps references another test in the folder added", () => {
+    // Measured 2026-08-21: regenerating this shared asmdef replaced ten
+    // references with three and broke a passing win/loss test — nineteen
+    // compile errors, none in the file that was rewritten.
+    const root = project(WITH_FRAMEWORK);
+    emitBootSmokeTest(root, 'Main');
+
+    const path = join(root, BOOT_TEST_DIR, 'Strada.Generated.PlayModeTests.asmdef');
+    const extended = JSON.parse(readFileSync(path, 'utf8'));
+    extended.references = [...extended.references, 'Game.Modules.Board', 'Game.Modules.Pig'];
+    writeFileSync(path, JSON.stringify(extended, null, 2));
+
+    emitBootSmokeTest(root, 'Main');
+
+    const after = JSON.parse(readFileSync(path, 'utf8'));
+    expect(after.references).toContain('Game.Modules.Board');
+    expect(after.references).toContain('Game.Modules.Pig');
+    // ...without losing what the boot test itself needs.
+    expect(after.references).toContain('Strada.Core');
+    expect(after.references).toContain('UnityEngine.TestRunner');
+  });
+
+  it("does not adopt references from an assembly that is not ours", () => {
+    const root = project(WITH_FRAMEWORK);
+    const dir = join(root, BOOT_TEST_DIR);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'Strada.Generated.PlayModeTests.asmdef'),
+      JSON.stringify({ name: 'SomebodyElse', references: ['Whatever'] }),
+    );
+
+    emitBootSmokeTest(root, 'Main');
+
+    const after = JSON.parse(readFileSync(join(dir, 'Strada.Generated.PlayModeTests.asmdef'), 'utf8'));
+    expect(after.name).toBe('Strada.Generated.PlayModeTests');
+    expect(after.references).not.toContain('Whatever');
+  });
 });

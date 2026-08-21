@@ -33,6 +33,13 @@ describe('the boot smoke test reports what the container holds', () => {
     expect(source).toContain('using Strada.Core.DI.Attributes;');
   });
 
+  it('does not import System, which would make UnityEngine.Object ambiguous', () => {
+    // Measured 2026-08-21: adding `using System;` here produced CS0104 on the
+    // existing Object.FindFirstObjectByType call and broke the whole assembly.
+    expect(source).not.toMatch(/^using System;$/mu);
+    expect(source).toContain('System.Attribute.IsDefined');
+  });
+
   it('reports rather than fails, because the framework allows a null injection', () => {
     const report = source.slice(source.indexOf('private static void ReportInjectionWiring'));
     const body = report.slice(0, report.indexOf('private static string Describe'));

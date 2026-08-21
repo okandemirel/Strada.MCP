@@ -154,7 +154,6 @@ export function buildBootSmokeTest(
 //
 // Boots the assembled scene in play mode and asserts the framework came up.
 // Edit freely: this file is only rewritten when the scene is rebuilt.
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -239,11 +238,11 @@ ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recor
             var parts = new List<string>();
 
             foreach (var field in type.GetFields(Members))
-                if (Attribute.IsDefined(field, typeof(InjectAttribute)))
+                if (System.Attribute.IsDefined(field, typeof(InjectAttribute)))
                     parts.Add(Describe(services, field.FieldType));
 
             foreach (var prop in type.GetProperties(Members))
-                if (Attribute.IsDefined(prop, typeof(InjectAttribute)))
+                if (System.Attribute.IsDefined(prop, typeof(InjectAttribute)))
                     parts.Add(Describe(services, prop.PropertyType));
 
             Debug.Log(parts.Count == 0
@@ -252,7 +251,7 @@ ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recor
         }
     }
 
-    private static string Describe(Strada.Core.Modules.IServiceLocator services, Type dependency)
+    private static string Describe(Strada.Core.Modules.IServiceLocator services, System.Type dependency)
     {
         return services.IsRegistered(dependency)
             ? $"{dependency.Name}=registered"
@@ -314,6 +313,33 @@ export interface BootTestEmission {
 }
 
 /** Writes the boot check into the project, or explains why it did not. */
+/**
+ * Our asmdef, keeping references somebody else added.
+ *
+ * This file is regenerated whenever a scene is built, and it is shared: Unity
+ * allows one assembly definition per folder, so every play-mode test in
+ * Assets/Tests/PlayMode compiles under ours. Measured 2026-08-21: regenerating
+ * it replaced ten references with three and broke a win/loss test that had been
+ * passing — nineteen compile errors, none of them in the file that was
+ * rewritten. The boot test needs Strada.Core and the test runner; the tests
+ * beside it need whatever they need, and that is not ours to drop.
+ */
+function mergedAsmdef(asmdefPath: string, generated: string): string {
+  if (!existsSync(asmdefPath)) return generated;
+  try {
+    const existing = JSON.parse(readFileSync(asmdefPath, 'utf8')) as Record<string, unknown>;
+    if (existing['name'] !== BOOT_TEST_ASSEMBLY) return generated;
+    const ours = JSON.parse(generated) as Record<string, unknown>;
+    const theirs = Array.isArray(existing['references']) ? (existing['references'] as string[]) : [];
+    const mine = Array.isArray(ours['references']) ? (ours['references'] as string[]) : [];
+    ours['references'] = [...new Set([...mine, ...theirs])];
+    return JSON.stringify(ours, null, 2);
+  } catch {
+    // Unreadable or not JSON: ours is the one we know compiles.
+    return generated;
+  }
+}
+
 export function emitBootSmokeTest(
   projectPath: string,
   sceneName: string,
@@ -354,7 +380,7 @@ export function emitBootSmokeTest(
   try {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(sourcePath, source);
-    writeFileSync(asmdefPath, asmdef);
+    writeFileSync(asmdefPath, mergedAsmdef(asmdefPath, asmdef));
   } catch (error) {
     return { written: false, reason: `could not write the boot test: ${String(error)}`, paths: [] };
   }
