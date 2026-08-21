@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from '../unity/local-diagnostics.js';
 import { emitBootSmokeTest } from './boot-smoke-test.js';
+import { resolveProjectPath } from '../unity/project-path.js';
 
 /**
  * Assemble a Unity scene from a declarative spec, with no Editor open.
@@ -109,7 +110,15 @@ export class SceneBuildTool implements ITool {
       return { content: `Error: Cannot execute ${this.name} in read-only mode.`, isError: true };
     }
 
-    const projectPath = String(input['projectPath'] ?? context.projectPath ?? '');
+    // Writing into a tree the session is not editing is worth saying out loud.
+    const project = resolveProjectPath(input['projectPath'], context.projectPath);
+    const result = await this.runBuild(input, project.projectPath);
+    return project.mismatchNote === undefined
+      ? result
+      : { ...result, content: `${result.content}\n\n${project.mismatchNote}` };
+  }
+
+  private async runBuild(input: Record<string, unknown>, projectPath: string): Promise<ToolResult> {
     if (!projectPath) {
       return { content: 'Error: no projectPath given and none in context.', isError: true };
     }

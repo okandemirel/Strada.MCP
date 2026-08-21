@@ -1,6 +1,7 @@
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { assetStoreRoots, listPurchasedPackages, searchPackages } from './asset-store-cache.js';
 import { importUnityPackage } from './package-import.js';
+import { resolveProjectPath } from './project-path.js';
 
 /**
  * Put a package the user already owns into the project.
@@ -71,7 +72,15 @@ export class ImportAssetPackageTool implements ITool {
       return { content: `Error: Cannot execute ${this.name} in read-only mode.`, isError: true };
     }
 
-    const projectPath = String(input['projectPath'] ?? context.projectPath ?? '');
+    // Writing into a tree the session is not editing is worth saying out loud.
+    const project = resolveProjectPath(input['projectPath'], context.projectPath);
+    const result = await this.runImport(input, project.projectPath);
+    return project.mismatchNote === undefined
+      ? result
+      : { ...result, content: `${result.content}\n\n${project.mismatchNote}` };
+  }
+
+  private async runImport(input: Record<string, unknown>, projectPath: string): Promise<ToolResult> {
     if (!projectPath) {
       return { content: 'Error: no projectPath given and none in context.', isError: true };
     }

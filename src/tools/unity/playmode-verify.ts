@@ -6,6 +6,7 @@ import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.inter
 import { findUnityEditor } from './local-diagnostics.js';
 import { parseTestRun, failedTests, playmodeVerdict } from './nunit-results.js';
 import type { FailedTest } from './nunit-results.js';
+import { resolveProjectPath } from './project-path.js';
 
 /**
  * Run the game in play mode and report whether it survived, with no Editor open.
@@ -126,7 +127,15 @@ export class PlaymodeVerifyTool implements ITool {
   }
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-    const projectPath = String(input['projectPath'] ?? context.projectPath ?? '');
+    const resolved = resolveProjectPath(input['projectPath'], context.projectPath);
+    const result = await this.run(input, resolved.projectPath);
+    // A verdict about another project is still a verdict; it just has to say which.
+    return resolved.mismatchNote === undefined
+      ? result
+      : { ...result, content: `${result.content}\n\n${resolved.mismatchNote}` };
+  }
+
+  private async run(input: Record<string, unknown>, projectPath: string): Promise<ToolResult> {
     if (!projectPath) {
       return { content: 'Error: no projectPath given and none in context.', isError: true };
     }
