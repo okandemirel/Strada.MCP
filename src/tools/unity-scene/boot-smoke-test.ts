@@ -169,6 +169,23 @@ public class StradaBootSmokeTest
     [UnityTest]
     public IEnumerator TheAssembledSceneBootsWithoutError()
     {
+        // Watch for errors, not for chatter.
+        //
+        // This check used to end with LogAssert.NoUnexpectedReceived(), which
+        // fails on any unhandled log line at all. Measured 2026-08-22 on a
+        // project using Strada.Core's logger: "Unhandled log message: '[Log]
+        // [Strada][General] [GameFlowSystem] OnInitialize'" — a system saying it
+        // initialized, which is this test passing, reported as this test
+        // failing. Only Error, Assert and Exception mean the scene did not boot.
+        var bootErrors = new List<string>();
+        Application.LogCallback watchBoot = (condition, stackTrace, type) =>
+        {
+            if (type == LogType.Error || type == LogType.Exception || type == LogType.Assert)
+                bootErrors.Add($"[{type}] {condition}");
+        };
+        Application.logMessageReceived += watchBoot;
+        LogAssert.ignoreFailingMessages = true;
+
         yield return SceneManager.LoadSceneAsync(${JSON.stringify(sceneName)}, LoadSceneMode.Single);
 
         // Wait for the thing being asserted, not for a number of frames.
@@ -207,9 +224,15 @@ public class StradaBootSmokeTest
 
         ReportInjectionWiring();
 
-        // Fails the test on any error or exception logged during the frames
-        // above, including ones no assertion was watching for.
-        LogAssert.NoUnexpectedReceived();
+        Application.logMessageReceived -= watchBoot;
+        LogAssert.ignoreFailingMessages = false;
+
+        // Carry the messages, not just the count: "an error was logged" sends
+        // the reader to the Unity console, the message itself sends them to the
+        // cause.
+        Assert.IsEmpty(
+            bootErrors,
+            "The scene logged errors while booting:\n" + string.Join("\n", bootErrors));
 
 ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recording omitted: this project has no screencapture/imageconversion module.'}
     }
