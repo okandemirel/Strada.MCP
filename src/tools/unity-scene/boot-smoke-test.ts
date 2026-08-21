@@ -234,10 +234,28 @@ ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recor
     {
         var services = GameBootstrapper.Services;
         var runner = GameBootstrapper.Systems;
+
+        // These are the states worth reporting, so they are reported. Returning
+        // in silence here left a run whose every [Inject] was null looking
+        // exactly like a run with nothing to say.
+        if (services == null)
+            Debug.Log("[StradaWiring] GameBootstrapper.Services is null - nothing can resolve, every [Inject] field will be null");
+        if (runner == null)
+            Debug.Log("[StradaWiring] GameBootstrapper.Systems is null - no OnUpdate will ever run");
         if (services == null || runner == null) return;
 
+        var systems = new List<object>();
+        foreach (var s in runner.GetAllSystems()) systems.Add(s);
+        if (systems.Count == 0)
+        {
+            // An empty runner means nothing ticks. Without this line the loop
+            // below simply produces no output, which reads as "all fine".
+            Debug.Log("[StradaWiring] the runner holds no systems - nothing will tick");
+            return;
+        }
+
         const BindingFlags Members = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        foreach (var system in runner.GetAllSystems())
+        foreach (var system in systems)
         {
             if (system == null) continue;
             var type = system.GetType();
