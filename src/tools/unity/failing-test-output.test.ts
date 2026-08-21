@@ -80,4 +80,28 @@ ${Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')}
     expect(rendered).toContain('LevelLost event should have fired');
     expect(rendered).toContain('grace timer reset by pig landing');
   });
+
+  it("says so when a failure printed nothing at all", () => {
+    const quiet = `<test-run><test-case fullname="T" result="Failed"><failure><message>LevelLost event should have fired</message></failure></test-case></test-run>`;
+
+    const rendered = (
+      new PlaymodeVerifyTool() as unknown as {
+        render(o: unknown, e: string[], f: readonly unknown[], x: number, r: string, l: string): string;
+      }
+    ).render({ result: 'Failed', total: 1, passed: 0, failed: 1, skipped: 0 }, [], failedTests(quiet), 2, 'tests-failed', '');
+
+    expect(rendered).toContain('printed anything');
+    expect(rendered).toContain('add logging');
+  });
+
+  it("stays quiet about logging when the output is already there", () => {
+    const rendered = (
+      new PlaymodeVerifyTool() as unknown as {
+        render(o: unknown, e: string[], f: readonly unknown[], x: number, r: string, l: string): string;
+      }
+    ).render({ result: 'Failed', total: 42, passed: 40, failed: 2, skipped: 0 }, [], failedTests(XML), 2, 'tests-failed', '');
+
+    expect(rendered).toContain('grace timer reset by pig landing');
+    expect(rendered).not.toContain('add logging');
+  });
 });

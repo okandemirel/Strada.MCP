@@ -387,6 +387,19 @@ export class PlaymodeVerifyTool implements ITool {
           for (const l of failure.output.split('\n')) lines.push(`      ${l}`);
         }
       }
+      // Silence here is itself the finding. Measured 2026-08-21: the project
+      // whose lose condition would not fire had Debug.Log in 2 of its 81 files
+      // and none in the failing test or the code under it, so "what did the
+      // game do instead" had no answer anywhere. Saying so turns a dead end
+      // into the next step.
+      if (failures.every((f) => !f.output)) {
+        lines.push(
+          '',
+          'None of the failed tests printed anything, so there is no record of what the ' +
+          'game did instead. An assertion says what was expected; add logging to the path ' +
+          'under test and run it again.',
+        );
+      }
     }
     if (exceptions.length > 0) {
       lines.push('', 'Exceptions logged during play:');
