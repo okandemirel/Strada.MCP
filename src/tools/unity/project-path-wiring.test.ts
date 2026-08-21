@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { PlaymodeVerifyTool } from './playmode-verify.js';
 
-const LEASE = '/var/folders/fd/T/strada-workspaces/task-85db6668';
-const ELSEWHERE = '/Users/okan/Documents/MaxedOutEntertainment/PixelFlow-Agent';
+// Paths that cannot exist on any machine: the tool must fail to find an editor
+// and return early, or the test spawns a real Unity and times out.
+const LEASE = '/nonexistent-strada/lease/task-85db6668';
+const ELSEWHERE = '/nonexistent-strada/elsewhere/PixelFlow-Agent';
 
 function context(projectPath: string) {
   return { projectPath, workingDirectory: projectPath, readOnly: false } as never;

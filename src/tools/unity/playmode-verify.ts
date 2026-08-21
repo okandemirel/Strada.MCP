@@ -214,11 +214,19 @@ export class PlaymodeVerifyTool implements ITool {
       const exceptions = this.playModeExceptions(log);
       const verdict = playmodeVerdict(outcome, exceptions);
 
+      // A test assembly that does not compile is not reported as a failure —
+      // Unity simply leaves it out, and the tests that DID build pass. Measured
+      // 2026-08-21: the same project ran 26 tests at 12:58 and 2 at 13:26, with
+      // nothing in between saying twenty-four had stopped running. "2 of 2
+      // passed" is the most dangerous sentence this tool can print.
+      const shape = playmodeResultShape(verdict.passed, this.compileErrorsIn(log));
+
       return {
         content:
           this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason, log) +
+          shape.suffix +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)),
-        isError: !verdict.passed,
+        isError: shape.isError,
       };
     } finally {
       try { rmSync(scratch, { recursive: true, force: true }); } catch { /* scratch */ }
@@ -407,4 +415,33 @@ export class PlaymodeVerifyTool implements ITool {
       });
     });
   }
+}
+
+/**
+ * Whether a play-mode run may be reported as a pass, and what to say if not.
+ *
+ * A test assembly that does not compile is not reported as a failure — Unity
+ * leaves it out, and the tests that DID build pass, so the tool prints
+ * "N of N tests ran clean" over a hole. Reasoned from that mechanism, not from
+ * an observed instance: the two drops that prompted this (26 tests to 2, then
+ * 42 to 14) turned out to be testFilter differences, not silent losses.
+ */
+export function playmodeResultShape(
+  verdictPassed: boolean,
+  buildErrors: readonly string[],
+): { isError: boolean; suffix: string } {
+  if (!verdictPassed) {
+    return { isError: true, suffix: '' };
+  }
+  if (buildErrors.length === 0) {
+    return { isError: false, suffix: '' };
+  }
+  return {
+    isError: true,
+    suffix:
+      '\n\nNOT A CLEAN PASS: the run also logged compile errors. An assembly that ' +
+      'does not build contributes no tests, so the total above counts only what ' +
+      'compiled — the tests in the broken assembly did not fail, they never ran.\n' +
+      buildErrors.join('\n'),
+  };
 }
