@@ -132,7 +132,38 @@ function tailOfOutput(chunk: string, maxLines = 12, maxChars = 800): string | un
   if (!text) {
     return undefined;
   }
-  const lines = text.split('\n').map((l) => l.trimEnd()).filter((l) => l !== '');
+  // A frame-by-frame log repeats: the same line every Update until something
+  // changes. Measured 2026-08-21: a failing test's twelve-line tail was the
+  // same sentence twelve times, and the lines that would have shown what
+  // preceded it had scrolled out. Collapsing runs of an identical line spends
+  // the budget on distinct observations instead — and it was reading one of
+  // these tails, seeing a line absent, that made me report a bug fixed when it
+  // had only scrolled away.
+  const lines = collapseRepeats(
+    text.split('\n').map((l) => l.trimEnd()).filter((l) => l !== ''),
+  );
   const tail = lines.slice(-maxLines).join('\n');
   return tail.length > maxChars ? tail.slice(-maxChars) : tail;
+}
+
+/** Consecutive identical lines become one, carrying how many times it repeated. */
+function collapseRepeats(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let last: string | null = null;
+  let count = 0;
+  const flush = () => {
+    if (last === null) return;
+    out.push(count > 1 ? `${last}  (x${count})` : last);
+  };
+  for (const line of lines) {
+    if (line === last) {
+      count++;
+      continue;
+    }
+    flush();
+    last = line;
+    count = 1;
+  }
+  flush();
+  return out;
 }

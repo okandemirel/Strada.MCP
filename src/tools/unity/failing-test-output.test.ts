@@ -104,4 +104,34 @@ ${Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')}
     expect(rendered).toContain('grace timer reset by pig landing');
     expect(rendered).not.toContain('add logging');
   });
+
+  it("spends the tail on distinct observations, not on repetition", () => {
+    // The measured shape: a frame-by-frame log where one line repeats until
+    // something changes. Twelve slots of the same sentence taught nothing.
+    const repeated = [
+      '<test-run><test-case fullname="T" result="Failed"><output><![CDATA[',
+      '[GameFlow] StartLevel(1) -> Playing',
+      ...Array.from({ length: 30 }, () => '[PigSystem.OnUpdate] PigService or Tray is null'),
+      '[GameFlow] level timed out',
+      ']]></output><failure><message>boom</message></failure></test-case></test-run>',
+    ].join('\n');
+
+    const out = failedTests(repeated)[0]?.output ?? '';
+
+    expect(out).toContain('StartLevel(1) -> Playing');
+    expect(out).toContain('(x30)');
+    expect(out).toContain('level timed out');
+    // Without collapsing, the opening line would have scrolled out of the tail.
+    expect(out.split('\n').length).toBeLessThanOrEqual(12);
+  });
+
+  it("leaves a log that never repeats exactly as it was", () => {
+    const varied = `<test-run><test-case fullname="T" result="Failed"><output><![CDATA[
+one
+two
+three
+]]></output><failure><message>boom</message></failure></test-case></test-run>`;
+
+    expect(failedTests(varied)[0]?.output).toBe('one\ntwo\nthree');
+  });
 });
