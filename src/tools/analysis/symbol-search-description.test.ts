@@ -28,6 +28,19 @@ describe('when the agent is told to search for a symbol', () => {
     expect(description).toMatch(/CS0111/);
   });
 
+  it('names the cannot-find errors too', () => {
+    // Measured 2026-08-21: the description named only the "already defined"
+    // case. The run in front of it had CS0246 — a type it could not FIND,
+    // needing exactly this tool to locate the namespace to import — and the
+    // agent never reached for it once.
+    expect(description).toMatch(/CS0246/);
+    expect(description).toMatch(/CS0103/);
+  });
+
+  it('says why both errors are the same question', () => {
+    expect(description).toMatch(/where a name lives/i);
+  });
+
   it('says searching by name beats guessing a path', () => {
     expect(description).toMatch(/beats guessing a path/i);
   });

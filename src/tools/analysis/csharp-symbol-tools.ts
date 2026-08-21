@@ -20,10 +20,11 @@ export class CSharpSymbolSearchTool implements ITool {
   readonly description =
     'Find where a C# type or member is declared, by name, across the project — classes, structs, ' +
     'interfaces, enums, methods, fields and properties. Use it BEFORE writing a new type, to see ' +
-    'whether it already exists somewhere else, and whenever the compiler says a type or member is ' +
-    'already defined (CS0101, CS0111), to find every declaration rather than guessing which file ' +
-    'holds it. Searching by name beats guessing a path: a type does not have to live in the folder ' +
-    'you expect.';
+    'whether it already exists somewhere else; when the compiler cannot FIND a type (CS0246, ' +
+    'CS0103), to locate its declaration and the namespace to import; and when the compiler says one ' +
+    'is ALREADY defined (CS0101, CS0111), to find every declaration. Both of those errors are ' +
+    'questions about where a name lives, which is what this answers. Searching by name beats ' +
+    'guessing a path: a type does not have to live in the folder you expect.';
   readonly inputSchema = zodToJsonSchema(symbolSearchSchema);
   readonly metadata: ToolMetadata = {
     category: 'analysis',
