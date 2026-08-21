@@ -112,4 +112,13 @@ describe('the payload actually uses the ranking', () => {
     expect(line, 'the batch payload no longer builds entries from distinct causes').toBeDefined();
     expect(line, 'entries are handed back unranked — log noise can lead').toContain('errorsFirst');
   });
+
+  it('ranks the dotnet branch entries too', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync('src/tools/unity/local-diagnostics.ts', 'utf8');
+    const line = source.split('\n').find((l) => l.includes('entries: ') && l.includes('dotnetSnapshot.entries') && l.includes('slice('));
+
+    expect(line, 'the dotnet payload no longer builds entries from the snapshot').toBeDefined();
+    expect(line, 'a machine with a .NET SDK still gets log noise as its failure evidence').toContain('errorsFirst');
+  });
 });

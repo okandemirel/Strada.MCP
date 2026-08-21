@@ -225,7 +225,12 @@ export async function getStaticCompileStatus(
         exitCode: dotnetSnapshot.exitCode,
         errorCount,
         warningCount,
-        entries: dotnetSnapshot.entries.slice(0, 20),
+        distinctIssues: distinctCompileEntries(dotnetSnapshot.entries).length,
+        // Same budget, same rule as the Unity batch branch below: a caller
+        // asking why a build failed is answered with its errors. This branch
+        // runs whenever a solution file exists, so leaving it a raw slice
+        // would have kept the blindness on every machine with a .NET SDK.
+        entries: errorsFirst(distinctCompileEntries(dotnetSnapshot.entries)).slice(0, 20),
       },
     };
   }
