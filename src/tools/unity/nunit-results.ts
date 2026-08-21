@@ -58,6 +58,15 @@ export interface FailedTest {
   readonly name: string;
   /** The assertion's own message, which is where the reason lives. */
   readonly message?: string;
+  /**
+   * What the game printed while this test ran, when the runner captured it.
+   *
+   * An assertion says what was expected and what arrived. It cannot say what
+   * the game was doing in between, and a state-machine failure — "the event
+   * should have fired" — is unarguable without that. The results file carries
+   * it; this parser used to read the message and discard the rest.
+   */
+  readonly output?: string;
 }
 
 /**
@@ -80,7 +89,10 @@ export function failedTests(xml: string, limit = 20): FailedTest[] {
     if (!name) continue;
     const raw = /<message>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/message>/.exec(chunk)?.[1];
     const message = raw?.trim().replace(/\s+/gu, ' ').slice(0, 400);
-    out.push(message ? { name, message } : { name });
+    // The tail, not the head: a run that ends wrong ends with the lines that
+    // explain it, and the opening frames of a play-mode test are boilerplate.
+    const output = tailOfOutput(chunk);
+    out.push({ name, ...(message ? { message } : {}), ...(output ? { output } : {}) });
   }
   return out;
 }
@@ -111,4 +123,16 @@ export function playmodeVerdict(
   if (outcome.passed === 0) return { passed: false, reason: "nothing-ran" };
   if (exceptions.length > 0) return { passed: false, reason: "threw" };
   return { passed: true, reason: "ok" };
+}
+
+/** The last lines a failing test printed, bounded so evidence stays readable. */
+function tailOfOutput(chunk: string, maxLines = 12, maxChars = 800): string | undefined {
+  const raw = /<output>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/output>/.exec(chunk)?.[1];
+  const text = raw?.trim();
+  if (!text) {
+    return undefined;
+  }
+  const lines = text.split('\n').map((l) => l.trimEnd()).filter((l) => l !== '');
+  const tail = lines.slice(-maxLines).join('\n');
+  return tail.length > maxChars ? tail.slice(-maxChars) : tail;
 }

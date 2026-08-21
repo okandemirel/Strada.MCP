@@ -381,6 +381,11 @@ export class PlaymodeVerifyTool implements ITool {
         lines.push(`  ${failure.name}`);
         // The name says which test; this says what it found.
         if (failure.message) lines.push(`      ${failure.message}`);
+        // ...and this says what the game was doing while it found it.
+        if (failure.output) {
+          lines.push('      --- output ---');
+          for (const l of failure.output.split('\n')) lines.push(`      ${l}`);
+        }
       }
     }
     if (exceptions.length > 0) {
