@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -258,7 +259,7 @@ export class PlaymodeVerifyTool implements ITool {
       return `\n\nNo frames were captured. ${reason ?? 'The boot test may predate capture support; reassemble the scene to regenerate it.'}`;
     }
 
-    const lines = [`\n\nRecorded ${frames.length} frame(s) in ${captureDir}`];
+    const lines = [`\n\nRecorded ${frames.length} frame(s) in ${captureDir}`, ...describeFrames(captureDir, frames)];
     const video = join(captureDir, 'playmode.mp4');
     const ffmpeg = spawnSync('ffmpeg', [
       '-y', '-framerate', '30',
@@ -438,6 +439,56 @@ export class PlaymodeVerifyTool implements ITool {
       });
     });
   }
+}
+
+/**
+ * What the recorded frames actually show, as fact rather than opinion.
+ *
+ * Everything else that asks "does this game render" has to name a cause in
+ * advance — no camera, no view layer, no spawner — and a game can fail to
+ * render for a reason nobody listed. The frames do not need a list: a run whose
+ * every frame is byte-identical drew the same picture from start to finish, and
+ * one whose frames barely compress drew a flat colour. Both are facts about the
+ * recording, and both are true regardless of which cause produced them.
+ *
+ * Reported, not asserted. A title screen legitimately holds still, and this
+ * tool does not know which it is looking at — but the run that reads the
+ * verdict does.
+ */
+function describeFrames(captureDir: string, frames: readonly string[]): string[] {
+  const sizes: number[] = [];
+  const digests = new Set<string>();
+  for (const frame of frames.slice(0, 60)) {
+    try {
+      const bytes = readFileSync(join(captureDir, frame));
+      sizes.push(bytes.byteLength);
+      digests.add(createHash('sha1').update(bytes).digest('hex'));
+    } catch {
+      // An unreadable frame is not evidence about the picture.
+    }
+  }
+  if (sizes.length === 0) return [];
+
+  const out: string[] = [];
+  const median = [...sizes].sort((a, b) => a - b)[Math.floor(sizes.length / 2)] ?? 0;
+  out.push(`Distinct frames: ${digests.size} of ${sizes.length} · median size ${Math.round(median / 1024)}KB`);
+
+  if (digests.size === 1) {
+    out.push(
+      'Every frame is identical, so nothing on screen changed for the whole run. ' +
+      'If the game was supposed to be playing, it was not.',
+    );
+  }
+  // A PNG of one flat colour compresses to almost nothing whatever its
+  // dimensions; a rendered scene does not.
+  if (median < 8 * 1024) {
+    out.push(
+      `The frames are ${Math.round(median / 1024)}KB, which is about what a single flat colour ` +
+      'compresses to. That is what an empty scene looks like: no camera, nothing spawned, or ' +
+      'nothing that draws.',
+    );
+  }
+  return out;
 }
 
 /**
