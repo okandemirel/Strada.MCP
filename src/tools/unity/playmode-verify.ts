@@ -79,6 +79,32 @@ export function describeRunScope(filter: string | undefined): string {
   return ` (filter: ${trimmed} — a subset, not the whole suite)`;
 }
 
+/**
+ * Tell a too-strict log assertion from a game that misbehaved.
+ *
+ * Unity's LogAssert can fail a test on any unhandled log line, informational
+ * ones included. Measured 2026-08-22, run 39: a boot check failed with
+ * "Unhandled log message: '[Log] [Strada][General] [GameFlowSystem]
+ * OnInitialize'" — a system reporting that it initialized. The wording points
+ * at whatever logged, so the agent read the test file four times over twenty
+ * minutes looking for a fault in the game, and there was none to find.
+ *
+ * [Error], [Assert] and [Exception] are left alone: there the test is doing
+ * exactly its job.
+ */
+export function explainLogAssertFailure(message: string): string {
+  const match = /Unhandled log message:\s*'\[(\w+)\]/u.exec(message ?? '');
+  if (!match) return '';
+  const level = match[1]?.toLowerCase();
+  if (level !== 'log' && level !== 'warning') return '';
+  return (
+    'This is the test failing, not the game: LogAssert treated an ordinary ' +
+    `[${match[1]}] line as unexpected output. The assertion is too strict — it ` +
+    'should watch for Error, Assert and Exception, not for every log line. ' +
+    'Fix the test, not the code that logged.'
+  );
+}
+
 export class PlaymodeVerifyTool implements ITool {
   readonly name = 'unity_playmode_verify';
   readonly description =
@@ -406,6 +432,9 @@ export class PlaymodeVerifyTool implements ITool {
         lines.push(`  ${failure.name}`);
         // The name says which test; this says what it found.
         if (failure.message) lines.push(`      ${failure.message}`);
+        // And this says what it means, when the message points the wrong way.
+        const logAssertNote = explainLogAssertFailure(failure.message ?? '');
+        if (logAssertNote) lines.push(`      ${logAssertNote}`);
         // ...and this says what the game was doing while it found it.
         if (failure.output) {
           lines.push('      --- output ---');
