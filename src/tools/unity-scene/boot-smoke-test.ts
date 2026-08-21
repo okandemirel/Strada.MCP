@@ -154,12 +154,16 @@ export function buildBootSmokeTest(
 //
 // Boots the assembled scene in play mode and asserts the framework came up.
 // Edit freely: this file is only rewritten when the scene is rebuilt.
+using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using Strada.Core.Bootstrap;
+using Strada.Core.DI.Attributes;
 
 public class StradaBootSmokeTest
 {
@@ -196,11 +200,63 @@ public class StradaBootSmokeTest
             "The bootstrapper initialized without publishing a service locator, "
             + "so nothing can resolve a service at runtime.");
 
+        ReportInjectionWiring();
+
         // Fails the test on any error or exception logged during the frames
         // above, including ones no assertion was watching for.
         LogAssert.NoUnexpectedReceived();
 
 ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recording omitted: this project has no screencapture/imageconversion module.'}
+    }
+
+
+    /// <summary>
+    /// What the container actually holds, for every system that asks it for something.
+    ///
+    /// Strada.Core assigns an unresolvable [Inject] dependency as null and says
+    /// nothing — a deliberate, permissive design — so the first sign of a missing
+    /// registration is a NullReferenceException somewhere else entirely.
+    /// Measured 2026-08-21: a run spent ninety minutes on a system whose injected
+    /// service was null, unable to ask whether it had ever been registered. The
+    /// live answer exists behind strada_container_graph and needs an editor
+    /// bridge; a headless play-mode run has none. This reports the same fact from
+    /// inside the run, where the question is actually being asked.
+    ///
+    /// It reports and does not fail. Whether an unresolved dependency is a defect
+    /// is the framework's call, and the framework has made it.
+    /// </summary>
+    private static void ReportInjectionWiring()
+    {
+        var services = GameBootstrapper.Services;
+        var runner = GameBootstrapper.Systems;
+        if (services == null || runner == null) return;
+
+        const BindingFlags Members = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        foreach (var system in runner.GetAllSystems())
+        {
+            if (system == null) continue;
+            var type = system.GetType();
+            var parts = new List<string>();
+
+            foreach (var field in type.GetFields(Members))
+                if (Attribute.IsDefined(field, typeof(InjectAttribute)))
+                    parts.Add(Describe(services, field.FieldType));
+
+            foreach (var prop in type.GetProperties(Members))
+                if (Attribute.IsDefined(prop, typeof(InjectAttribute)))
+                    parts.Add(Describe(services, prop.PropertyType));
+
+            Debug.Log(parts.Count == 0
+                ? $"[StradaWiring] {type.Name}: nothing injected"
+                : $"[StradaWiring] {type.Name}: {string.Join(", ", parts)}");
+        }
+    }
+
+    private static string Describe(Strada.Core.Modules.IServiceLocator services, Type dependency)
+    {
+        return services.IsRegistered(dependency)
+            ? $"{dependency.Name}=registered"
+            : $"{dependency.Name}=NOT REGISTERED";
     }
 
 ${withCapture ? CAPTURE_METHOD : ''}}
