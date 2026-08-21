@@ -511,10 +511,28 @@ export class VerifyChangeTool extends CompositeBridgeTool {
         // No error breakdown available: fall back to the run's own flag rather
         // than to the issue total, which would fail on a warning.
         : offline.compile.lastSucceeded === false;
+      // A caller that asked for tests did not ask whether the code compiles.
+      // runTests is honoured only on the bridge path; offline it is silently
+      // dropped, and the answer came back "passed". Measured 2026-08-21, 15:47:
+      // an agent passed runTests:true, testMode:"play", read "passed", and then
+      // spent twelve minutes trying to launch Unity by hand.
+      const testsRequestedButImpossible = input['runTests'] === true && !failed;
       return {
         content: JSON.stringify({
-          status: failed ? 'failed' : offline.verified ? 'passed' : 'unknown',
+          status: failed
+            ? 'failed'
+            : testsRequestedButImpossible
+              ? 'tests-not-run'
+              : offline.verified ? 'passed' : 'unknown',
           mode: 'offline',
+          ...(testsRequestedButImpossible
+            ? {
+                runTestsIgnored:
+                  'You asked this check to run tests. It cannot: there is no editor bridge, and a ' +
+                  'headless compile does not build test assemblies. The compile result below is ' +
+                  'real and says nothing about your tests. Run unity_playmode_verify.',
+              }
+            : {}),
           reason: failed
             ? `Headless compile failed${Number.isFinite(errorCount) ? ` with ${errorCount} error(s)` : ''}` +
               `${issues > 0 ? ` (${issues} compile entries including warnings)` : ''}.`
@@ -530,7 +548,7 @@ export class VerifyChangeTool extends CompositeBridgeTool {
           summary: { compileErrors: Number.isFinite(errorCount) ? errorCount : null, compileIssues: issues },
           compile: offline,
         }, null, 2),
-        isError: failed,
+        isError: failed || testsRequestedButImpossible,
       };
     }
 

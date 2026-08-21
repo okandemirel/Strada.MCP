@@ -369,4 +369,49 @@ describe("what a passing compile does not cover", () => {
     expect(payload['reason']).toMatch(/compile failed/i);
     expect(payload['reason']).not.toMatch(/Test assemblies/i);
   });
+
+  it('refuses to answer "passed" to a caller that asked for tests', async () => {
+    // Measured 2026-08-21: runTests is honoured only on the bridge path. Offline
+    // it was dropped and the verdict came back "passed", so an agent that asked
+    // for tests was told its code was fine and went looking for another way in.
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: {
+        isCompiling: false, isReloading: false, lastStartedAt: null,
+        lastFinishedAt: 1, lastSucceeded: true, compileIssueCount: 0, assemblyReloadCount: 0,
+      },
+      diagnostics: { errorCount: 0 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({ runTests: true, testMode: 'play' }, context());
+    const payload = JSON.parse(String(result.content));
+
+    expect(payload.status).toBe('tests-not-run');
+    expect(payload.runTestsIgnored).toContain('unity_playmode_verify');
+    expect(result.isError).toBe(true);
+  });
+
+  it('still reports a plain compile check as passed', async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: {
+        isCompiling: false, isReloading: false, lastStartedAt: null,
+        lastFinishedAt: 1, lastSucceeded: true, compileIssueCount: 0, assemblyReloadCount: 0,
+      },
+      diagnostics: { errorCount: 0 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(String(result.content));
+
+    expect(payload.status).toBe('passed');
+    expect(payload.runTestsIgnored).toBeUndefined();
+    expect(result.isError).toBeFalsy();
+  });
 });
