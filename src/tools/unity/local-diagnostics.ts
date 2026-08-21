@@ -37,6 +37,18 @@ export interface ConsoleLogEntry {
  * file and line stripped, because the same fault at a different line is the
  * same fault.
  */
+
+/** Errors, then warnings, then everything else — order preserved within each. */
+export function errorsFirst(entries: readonly ConsoleLogEntry[]): ConsoleLogEntry[] {
+  const rank = (entry: ConsoleLogEntry): number => {
+    const type = String(entry.type ?? '').toLowerCase();
+    if (type === 'error' || type === 'exception' || type === 'assert') return 0;
+    if (type === 'warning') return 1;
+    return 2;
+  };
+  return [...entries].sort((a, b) => rank(a) - rank(b));
+}
+
 export function distinctCompileEntries(entries: readonly ConsoleLogEntry[]): ConsoleLogEntry[] {
   const seen = new Set<string>();
   const out: ConsoleLogEntry[] = [];
@@ -257,10 +269,13 @@ export async function getStaticCompileStatus(
                 'opening a project with a newer Unity upgrades it in place.',
             }),
         distinctIssues: distinctCompileEntries(batchSnapshot.entries).length,
-        // Distinct causes, not the first twenty lines. One missing interface
-        // produces an error in every file that uses it, so a raw slice can
-        // spend the whole budget restating a single root cause.
-        entries: distinctCompileEntries(batchSnapshot.entries).slice(0, 20),
+        // Distinct causes, errors first. One missing interface produces an
+        // error in every file that uses it, so a raw slice spends the whole
+        // budget restating a single root cause — and measured 2026-08-21, the
+        // first entry a failing compile handed back was "Mono: successfully
+        // reloaded assembly". A caller asking why a build failed is answered
+        // with its errors, not with the reload chatter around them.
+        entries: errorsFirst(distinctCompileEntries(batchSnapshot.entries)).slice(0, 20),
       },
     };
   }
