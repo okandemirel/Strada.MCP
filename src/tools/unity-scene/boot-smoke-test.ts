@@ -232,7 +232,7 @@ public class StradaBootSmokeTest
         // cause.
         Assert.IsEmpty(
             bootErrors,
-            "The scene logged errors while booting:\n" + string.Join("\n", bootErrors));
+            "The scene logged errors while booting:\\n" + string.Join("\\n", bootErrors));
 
 ${withCapture ? '        yield return CaptureIfRequested();' : '        // Recording omitted: this project has no screencapture/imageconversion module.'}
     }
