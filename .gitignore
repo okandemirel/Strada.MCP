@@ -6,3 +6,6 @@ dist/
 *.sqlite
 *.sqlite-journal
 coverage/
+
+# Generated codebase-memory vault (SQLite index + WAL, ~22MB, rebuilt on demand)
+.strada/
