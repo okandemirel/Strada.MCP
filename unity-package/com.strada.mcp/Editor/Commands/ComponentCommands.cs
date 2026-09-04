@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Strada.Mcp.Editor.Server;
 using Strada.Mcp.Runtime;
 using UnityEditor;
@@ -150,7 +151,49 @@ namespace Strada.Mcp.Editor.Commands
                     return type;
             }
 
-            throw new JsonRpcException(ErrorCode.ComponentNotFound, $"Component type not found: {typeName}");
+            // Say WHICH type they meant. Measured live 2026-09-04: a sprint
+            // asked for Game.Modules.PixelFlowSim.Views.TapInputService, which
+            // exists as Game.Modules.PixelFlowSim.TapInputService, and "type
+            // not found" left it no way to tell a wrong namespace from a
+            // missing script. Reflection over every assembly is affordable
+            // here because this runs only on the failure path.
+            throw new JsonRpcException(
+                ErrorCode.ComponentNotFound,
+                ComponentTypeSuggestion.Describe(typeName, EnumerateComponentTypeNames()));
+        }
+
+        /// <summary>
+        /// Full names of every Component-derived type in the loaded domain.
+        /// An assembly that cannot be reflected contributes what it can:
+        /// ReflectionTypeLoadException still carries the types it did load,
+        /// and dropping the whole assembly would hide the very type the caller
+        /// is looking for.
+        /// </summary>
+        private static IEnumerable<string> EnumerateComponentTypeNames()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types;
+                }
+                catch
+                {
+                    continue;
+                }
+                foreach (var type in types)
+                {
+                    if (type == null) continue;
+                    if (!typeof(Component).IsAssignableFrom(type)) continue;
+                    if (string.IsNullOrEmpty(type.FullName)) continue;
+                    yield return type.FullName;
+                }
+            }
         }
 
         private static bool IsComponentEnabled(Component comp)
