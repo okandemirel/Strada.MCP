@@ -583,7 +583,19 @@ export class VerifyChangeTool extends CompositeBridgeTool {
               }
             : {}),
           reason: failed
-            ? `Headless compile failed${Number.isFinite(errorCount) ? ` with ${errorCount} error(s)` : ''}` +
+            // NAME WHICH SIGNAL FAILED IT. Measured live 2026-09-04 17:29: a
+            // campaign sprint read "Headless compile failed with 0 error(s)."
+            // — a verdict that contradicts its own measurement, and gives the
+            // reader nothing to fix. The verdict was RIGHT (the run did not
+            // succeed) but the count is meaningless in that case: the compile
+            // was killed or never finished, so it produced no errors to count.
+            // A failure on a real error count still names the count.
+            ? (Number.isFinite(errorCount) && errorCount > 0
+                ? `Headless compile failed with ${errorCount} error(s)`
+                : 'Headless compile did not complete — it was killed or never finished, so there is ' +
+                  'no error count to read. This is NOT a clean compile and NOT a code error you can ' +
+                  'fix from this message: re-run the check, and if it keeps ending this way the ' +
+                  'compile is timing out') +
               `${issues > 0 ? ` (${issues} compile entries including warnings)` : ''}.`
             : offline.verified
               // A pass here covers the runtime assemblies only. Test assemblies

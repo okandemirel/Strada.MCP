@@ -207,6 +207,51 @@ describe('what the offline verdict says at its root', () => {
     expect(result.isError).toBe(true);
   });
 
+  it('a killed compile says it was killed, not "failed with 0 error(s)"', async () => {
+    // Measured live 2026-09-04 17:29. A campaign sprint read
+    // "Headless compile failed with 0 error(s)." — the verdict was right (the
+    // run did not succeed) but the sentence contradicts its own measurement
+    // and names nothing the reader can fix. This is the SIGKILL-at-timeout
+    // shape: zero errors parsed, success flag false.
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: false, compileIssueCount: 0 },
+      diagnostics: { errorCount: 0, warningCount: 0 },
+      capturedAt: 1,
+    });
+
+    const result = await new VerifyChangeTool().execute({}, context());
+    const payload = JSON.parse(result.content) as Record<string, unknown>;
+
+    expect(payload['status']).toBe('failed');
+    expect(result.isError).toBe(true);
+    // Still a failure — a killed compile must never read as green.
+    expect(payload['reason']).not.toMatch(/with 0 error\(s\)/);
+    expect(payload['reason']).toMatch(/did not complete/);
+    expect(payload['reason']).toMatch(/killed or never finished/);
+    expect((payload['summary'] as { compileErrors: number }).compileErrors).toBe(0);
+  });
+
+  it('a real error count is still named', async () => {
+    getStaticCompileStatus.mockResolvedValue({
+      source: 'static_unity_batch',
+      bridgeMethod: 'editor.compileStatus',
+      verified: true,
+      compile: { isCompiling: false, isReloading: false, lastSucceeded: false, compileIssueCount: 98 },
+      diagnostics: { errorCount: 43, warningCount: 55 },
+      capturedAt: 1,
+    });
+
+    const payload = JSON.parse(
+      (await new VerifyChangeTool().execute({}, context())).content,
+    ) as Record<string, unknown>;
+
+    expect(payload['reason']).toMatch(/failed with 43 error\(s\)/);
+    expect(payload['reason']).not.toMatch(/did not complete/);
+  });
+
   it('separates "did not verify" from "verified and failed"', async () => {
     getStaticCompileStatus.mockResolvedValue({
       source: 'static_unity_batch',
