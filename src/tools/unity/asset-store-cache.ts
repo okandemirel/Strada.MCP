@@ -40,34 +40,44 @@ export interface PurchasedPackage {
   readonly downloadedAtMs: number;
 }
 
-/** Every package under a cache root. Missing roots yield nothing, not an error. */
+/** Every package under a cache root. Missing roots yield nothing, not an error.
+ *  Walks up to 4 levels, not the exact publisher/category shape: real caches
+ *  hold packages at other depths too, and a package the scan cannot see makes
+ *  the tool state "nothing is available locally" — sending the agent to
+ *  GENERATE an asset the user already owns. */
 export function listPurchasedPackages(root: string): PurchasedPackage[] {
   if (!existsSync(root)) return [];
 
   const packages: PurchasedPackage[] = [];
-  for (const publisher of safeDirs(root)) {
-    const publisherDir = join(root, publisher);
-    for (const category of safeDirs(publisherDir)) {
-      const categoryDir = join(publisherDir, category);
-      for (const entry of safeEntries(categoryDir)) {
-        if (!entry.endsWith('.unitypackage')) continue;
-        const path = join(categoryDir, entry);
-        try {
-          const stat = statSync(path);
-          packages.push({
-            name: entry.replace(/\.unitypackage$/, ''),
-            publisher,
-            category,
-            path,
-            sizeBytes: stat.size,
-            downloadedAtMs: stat.mtimeMs,
-          });
-        } catch {
-          // Vanished between listing and stat; nothing to report.
-        }
+  const walk = (dir: string, depth: number, publisher: string, category: string): void => {
+    for (const entry of safeEntries(dir)) {
+      if (!entry.endsWith('.unitypackage')) continue;
+      const path = join(dir, entry);
+      try {
+        const stat = statSync(path);
+        packages.push({
+          name: entry.replace(/\.unitypackage$/, ''),
+          publisher: publisher || '(root)',
+          category: category || '(uncategorized)',
+          path,
+          sizeBytes: stat.size,
+          downloadedAtMs: stat.mtimeMs,
+        });
+      } catch {
+        // Vanished between listing and stat; nothing to report.
       }
     }
-  }
+    if (depth >= 4) return;
+    for (const sub of safeDirs(dir)) {
+      walk(
+        join(dir, sub),
+        depth + 1,
+        depth === 0 ? sub : publisher,
+        depth === 1 ? sub : category,
+      );
+    }
+  };
+  walk(root, 0, '', '');
   return packages;
 }
 

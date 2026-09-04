@@ -64,6 +64,15 @@ describe('the play-mode verdict', () => {
     expect(playmodeVerdict(outcome(5, 1)).reason).toBe('tests-failed');
   });
 
+  it('fails a run NUnit marked Failed even when every case passed', () => {
+    // A OneTimeTearDown/SetUp-site failure is recorded on the RUN
+    // (result="Failed") without incrementing any case's failed count —
+    // counting cases alone reported "passed" while printing runResult=Failed.
+    const verdict = playmodeVerdict({ result: 'Failed', total: 5, passed: 5, failed: 0, skipped: 0 });
+
+    expect(verdict).toEqual({ passed: false, reason: 'run-failed' });
+  });
+
   it('fails a green run in which the game threw', () => {
     // Every assertion passed and a MonoBehaviour still blew up; nothing else
     // would have caught it, because no test was watching.

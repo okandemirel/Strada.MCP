@@ -112,7 +112,7 @@ export function failedTests(xml: string, limit = 20): FailedTest[] {
 export function playmodeVerdict(
   outcome: TestRunOutcome | null,
   exceptions: readonly string[] = [],
-): { passed: boolean; reason: "ok" | "no-results" | "nothing-ran" | "tests-failed" | "threw" } {
+): { passed: boolean; reason: "ok" | "no-results" | "nothing-ran" | "tests-failed" | "run-failed" | "threw" } {
   if (outcome === null) return { passed: false, reason: "no-results" };
   if (outcome.total === 0) return { passed: false, reason: "nothing-ran" };
   if (outcome.failed > 0) return { passed: false, reason: "tests-failed" };
@@ -121,6 +121,13 @@ export function playmodeVerdict(
   // catch, arriving through a different door. NUnit skips a whole assembly when
   // its constraints exclude the platform, so this is not a rare shape.
   if (outcome.passed === 0) return { passed: false, reason: "nothing-ran" };
+  // The run's OWN result attribute. NUnit records a OneTimeTearDown/SetUp-site
+  // failure as result="Failed" WITHOUT incrementing any case's failed count —
+  // counting cases alone reported "passed" one line above the printout of
+  // runResult=Failed.
+  if (outcome.result !== "" && outcome.result !== "Passed") {
+    return { passed: false, reason: "run-failed" };
+  }
   if (exceptions.length > 0) return { passed: false, reason: "threw" };
   return { passed: true, reason: "ok" };
 }

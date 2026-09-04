@@ -70,8 +70,13 @@ export class UnityDocsLookupTool implements ITool {
         metadata: { executionTimeMs: Math.round(performance.now() - start) },
       };
     } catch (error) {
+      // Zod's bare "Invalid URL" sent agents guessing; say what the inputs are.
+      const message = error instanceof Error ? error.message : String(error);
+      const guidance = /invalid url|invalid input/i.test(message)
+        ? ` — pass symbol: "Transform" (or "Rigidbody.AddForce"), manualPage: "class-PlayerSettings", or url: a FULL https://docs.unity3d.com/... address. Do not put symbols or paths in the url field.`
+        : '';
       return {
-        content: error instanceof Error ? error.message : String(error),
+        content: `${message}${guidance}`,
         isError: true,
       };
     }

@@ -453,10 +453,14 @@ async function tryRunDotnetBuild(
   allowHeadlessCompile = false,
 ): Promise<DotnetBuildSnapshot | null> {
   // Generating a missing solution means launching Unity, which is the expensive,
-  // side-effecting operation a passive poll must never trigger.
-  const solutionPath =
-    (await findSolutionPath(projectPath)) ??
-    (allowHeadlessCompile ? await trySyncSolutionHeadless(projectPath) : null);
+  // side-effecting operation a passive poll must never trigger. But when a
+  // VERIFICATION opted into headless compiling, the solution must be FRESH:
+  // Unity .csproj files enumerate sources explicitly, so a stale reused .sln
+  // does not contain the file the agent just wrote — `dotnet build` then
+  // returns green over code it never compiled.
+  const solutionPath = allowHeadlessCompile
+    ? ((await trySyncSolutionHeadless(projectPath)) ?? (await findSolutionPath(projectPath)))
+    : await findSolutionPath(projectPath);
   if (!solutionPath) {
     return null;
   }
@@ -855,6 +859,10 @@ function parseDotnetBuildEntries(lines: string[]): ConsoleLogEntry[] {
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => /\b(?:error|warning)\b/i.test(line))
+    // MSBuild's tally lines ("    0 Error(s)", "    3 Warning(s)") contain the
+    // word but are counts, not diagnostics — kept, a CLEAN build classified as
+    // one error and every verdict on the dotnet path went false-red.
+    .filter((line) => !/^\d+\s+(?:Error|Warning)\(s\)$/i.test(line))
     .map((line) => {
       const parsedLocation = parseLocation(line);
       return {

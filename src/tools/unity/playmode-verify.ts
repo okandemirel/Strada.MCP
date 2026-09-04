@@ -73,10 +73,17 @@ export function buildPlaymodeArgs(options: {
  * filtered run and a suite that silently lost an assembly produce the same
  * sentence, and the agent has no way to tell which it is looking at.
  */
-export function describeRunScope(filter: string | undefined): string {
-  const trimmed = filter?.trim();
-  if (!trimmed) return ' (unfiltered — the whole PlayMode suite)';
-  return ` (filter: ${trimmed} — a subset, not the whole suite)`;
+export function describeRunScope(filter: string | undefined, categories?: string | undefined): string {
+  const trimmedFilter = filter?.trim();
+  const trimmedCategories = categories?.trim();
+  // Categories filter the run exactly like testFilter does — reporting a
+  // category-scoped run as "the whole suite" was a lie with the same cost.
+  if (!trimmedFilter && !trimmedCategories) return ' (unfiltered — the whole PlayMode suite)';
+  const parts = [
+    trimmedFilter ? `filter: ${trimmedFilter}` : null,
+    trimmedCategories ? `categories: ${trimmedCategories}` : null,
+  ].filter(Boolean);
+  return ` (${parts.join(", ")} — a subset, not the whole suite)`;
 }
 
 /**
@@ -203,7 +210,10 @@ export class PlaymodeVerifyTool implements ITool {
       // Metal device and the tests still run headlessly.
       const capture = input['capture'] === true;
       const captureDir = capture
-        ? String(input['captureDir'] ?? join(projectPath, 'Recordings'))
+        ? (() => {
+            const requested = String(input['captureDir'] ?? 'Recordings');
+            return requested.startsWith('/') ? requested : join(projectPath, requested);
+          })()
         : null;
       if (captureDir !== null) {
         try {
@@ -263,7 +273,16 @@ export class PlaymodeVerifyTool implements ITool {
 
       return {
         content:
-          this.render(outcome, exceptions, failedTests(xml), exitCode, verdict.reason, log, typeof input['testFilter'] === 'string' ? input['testFilter'] : undefined) +
+          this.render(
+            outcome,
+            exceptions,
+            failedTests(xml),
+            exitCode,
+            verdict.reason,
+            log,
+            typeof input['testFilter'] === 'string' ? input['testFilter'] : undefined,
+            typeof input['categories'] === 'string' ? input['categories'] : undefined,
+          ) +
           shape.suffix +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)),
         isError: shape.isError,
@@ -371,6 +390,23 @@ export class PlaymodeVerifyTool implements ITool {
         `the test runner was never reached.\n${compileErrors.join('\n')}`
       );
     }
+    // Two states that used to be misreported as "no test assembly", sending
+    // the agent to fix a non-problem:
+    if (/It looks like another Unity instance is running with this project open|Multiple Unity instances cannot open the same project/i.test(log)) {
+      return (
+        `PlayMode tests never ran: ANOTHER Unity instance has this project open ` +
+        `(Temp/UnityLockfile is held). Close it or wait, then retry — this is not a test problem.\n` +
+        `Last lines of the log:\n${log.split('\n').slice(-10).join('\n')}`
+      );
+    }
+    if (exitCode === -1) {
+      return (
+        `PlayMode tests never ran to completion: Unity was KILLED at the tool's deadline before ` +
+        `writing results — typically a cold Library import (a fresh worktree pays a full import). ` +
+        `Retry once; a warmed Library usually fits the budget. This is not evidence about the tests.\n` +
+        `Last lines of the log:\n${log.split('\n').slice(-10).join('\n')}`
+      );
+    }
     return (
       `PlayMode tests never ran and no results file was written (Unity exit ${exitCode}). ` +
       `This is usually no PlayMode test assembly in the project, or a Unity that failed to ` +
@@ -386,6 +422,7 @@ export class PlaymodeVerifyTool implements ITool {
     reason: string,
     log: string,
     filter?: string,
+    categories?: string,
   ): string {
     const lines: string[] = [];
 
@@ -410,7 +447,13 @@ export class PlaymodeVerifyTool implements ITool {
     } else if (reason === 'tests-failed') {
       lines.push(
         `PlayMode verification FAILED: ${outcome.failed} of ${outcome.total} tests failed` +
-        `${describeRunScope(filter)}.`,
+        `${describeRunScope(filter, categories)}.`,
+      );
+    } else if (reason === 'run-failed') {
+      lines.push(
+        `PlayMode verification FAILED: every test case passed but the RUN itself is marked ` +
+        `${outcome.result} — a SetUp/TearDown-site failure NUnit records on the run, not on ` +
+        `any case. Check OneTimeSetUp/OneTimeTearDown and the log tail below.`,
       );
     } else if (reason === 'threw') {
       lines.push(

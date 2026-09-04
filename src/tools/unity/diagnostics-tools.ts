@@ -1,9 +1,45 @@
 import { z } from 'zod';
+import { resolve as resolvePath } from 'node:path';
+import { realpathSync } from 'node:fs';
 import type { BridgeClient } from '../../bridge/bridge-client.js';
 import type { ITool, ToolContext, ToolMetadata, ToolResult } from '../tool.interface.js';
 import { zodToJsonSchema } from '../../utils/zod-to-json-schema.js';
 import { BridgeTool } from './bridge-tool.js';
 import { getStaticCompileStatus } from './local-diagnostics.js';
+
+/** Canonical form for project-path identity (macOS /var vs /private/var). */
+function canonicalProjectPath(p: string): string {
+  try {
+    return realpathSync(resolvePath(p));
+  } catch {
+    return resolvePath(p);
+  }
+}
+
+/**
+ * Does the connected Editor verify THIS tree? The bridge Editor has the
+ * configured project (UNITY_PROJECT_PATH) open. A task running in a lease
+ * worktree asks about a DIFFERENT tree, and the Editor's compile verdict says
+ * nothing about that tree's code — answering from the bridge was a green
+ * verdict for code the agent did not write. Unknown env ⇒ assume yes.
+ */
+function bridgeTargetsTree(contextProjectPath: string): boolean {
+  const envProject = process.env['UNITY_PROJECT_PATH'];
+  if (!envProject || !contextProjectPath) return true;
+  return canonicalProjectPath(envProject) === canonicalProjectPath(contextProjectPath);
+}
+
+/**
+ * Serialize bridge compile/test rounds. One Editor, one GLOBAL compile state:
+ * two concurrent verify calls both trigger `editor.recompile` and both poll
+ * the same status — each can read the other's compile as its own verdict.
+ */
+let bridgeVerifyChain: Promise<unknown> = Promise.resolve();
+function withBridgeVerifyLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = bridgeVerifyChain.then(fn, fn);
+  bridgeVerifyChain = next.catch(() => undefined);
+  return next;
+}
 
 const compileStatusSchema = z.object({});
 const compileWaitSchema = z.object({
@@ -454,10 +490,13 @@ export class VerifyChangeTool extends CompositeBridgeTool {
   // offline path was unreachable, not unused.
   protected override readonly bridgeRequired = false;
   // A headless Unity compile takes tens of seconds to minutes, plus a possible
-  // licence round-trip. Generous enough that the inner batch timeout (300s) is
-  // what actually fires, so a hang is reported as a compile timeout with
-  // diagnostics rather than as an opaque host-level kill.
-  protected override readonly toolTimeoutMs = 360_000;
+  // licence round-trip. The cap must cover the WORST inner sequence — solution
+  // sync (300s) + dotnet build (120s) + unity batch compile (300s) — with
+  // headroom, so the inner timeouts (which produce diagnostics and reap their
+  // own child processes) always fire before the host adapter's opaque kill.
+  // At 360s the adapter killed the wrapper while the Unity child kept running
+  // and held Temp/UnityLockfile against every later verification.
+  protected override readonly toolTimeoutMs = 800_000;
   readonly name = 'unity_verify_change';
   readonly description =
     'Run a closed verification loop across compile status, console analysis, tests, optional screenshot capture, optional build, and optional Strada profiling';
@@ -480,16 +519,22 @@ export class VerifyChangeTool extends CompositeBridgeTool {
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const noBridge = await this.ensureBridge(context);
-    if (noBridge) {
+    // Wrong-tree guard: the connected Editor has the CONFIGURED project open;
+    // a lease-worktree task must be answered by a headless compile of ITS OWN
+    // tree, never by the Editor's verdict about a different one.
+    const bridgeIsWrongTree = !noBridge && !bridgeTargetsTree(context.projectPath);
+    if (noBridge || bridgeIsWrongTree) {
       // "Verify my change" used to give up here, which left an agent with no way
       // to check its own work whenever the editor was closed — measured, a run
       // ended by asking a human whether to proceed unverified. Compiling
-      // headlessly is slow and can upgrade the project, so it is opt-in
+      // headlessly is slow and can upgrade the project, so it is opted out
       // everywhere else; this is the one caller whose entire purpose is to get a
       // real answer, so it opts in.
       const offline = await getStaticCompileStatus({
         projectPath: context.projectPath,
-        bridgeError: 'Unity bridge not connected',
+        bridgeError: bridgeIsWrongTree
+          ? 'Unity bridge is connected to a DIFFERENT project than this workspace — its verdict would not be about this tree; compiled headlessly instead'
+          : 'Unity bridge not connected',
         allowHeadlessCompile: true,
       });
       // Same shape as the bridged verdict: the outcome at the root, evidence
@@ -506,11 +551,15 @@ export class VerifyChangeTool extends CompositeBridgeTool {
       const errorCount = Number(
         (offline.diagnostics as { errorCount?: unknown } | undefined)?.errorCount ?? Number.NaN,
       );
-      const failed = Number.isFinite(errorCount)
-        ? errorCount > 0
-        // No error breakdown available: fall back to the run's own flag rather
-        // than to the issue total, which would fail on a warning.
-        : offline.compile.lastSucceeded === false;
+      // Two independent failure signals, EITHER fails the verdict:
+      //   - a positive error count, and
+      //   - the run's own success flag being false. A compile SIGKILLed at the
+      //     batch timeout produces errorCount=0 with lastSucceeded=false, and
+      //     the old errorCount-first logic read that as "passed" — a killed
+      //     compile reported as green.
+      const failed =
+        (Number.isFinite(errorCount) && errorCount > 0) ||
+        offline.compile.lastSucceeded === false;
       // A caller that asked for tests did not ask whether the code compiles.
       // runTests is honoured only on the bridge path; offline it is silently
       // dropped, and the answer came back "passed". Measured 2026-08-21, 15:47:
@@ -553,13 +602,21 @@ export class VerifyChangeTool extends CompositeBridgeTool {
     }
 
     const parsed = this.schema.parse(input);
+    // One Editor, one global compile state: the whole bridge round is
+    // serialized so a concurrent verify cannot read this one's compile.
+    return withBridgeVerifyLock(async (): Promise<ToolResult> => {
     const evidence: Record<string, unknown> = {};
 
     if (parsed.recompile) {
       evidence.recompile = await this.client!.request('editor.recompile', { reason: 'unity_verify_change' });
     }
 
-    evidence.compile = await waitForCompile(this.client!, parsed.compileTimeoutMs, parsed.pollIntervalMs);
+    evidence.compile = await waitForCompile(
+      this.client!,
+      parsed.compileTimeoutMs,
+      parsed.pollIntervalMs,
+      parsed.recompile === true,
+    );
     const wait = evidence.compile as { status?: string; compile?: CompileStatusResult };
     if (wait.status === 'timeout') {
       // Unity still working when the clock runs out is not a verdict on the
@@ -618,20 +675,38 @@ export class VerifyChangeTool extends CompositeBridgeTool {
     const tests = evidence.tests as TestResultsPayload | undefined;
     const build = evidence.build as { success?: boolean } | undefined;
     const testFailures = Number(tests?.summary?.failed ?? 0);
+    // Zero tests is not a pass — a test run whose total is 0 (assembly did not
+    // compile, filter matched nothing) proved nothing. Same rule the headless
+    // playmode path has always enforced.
+    const testTotal = Number(tests?.summary?.total ?? Number.NaN);
+    const emptyTestRun =
+      parsed.runTests === true && (!Number.isFinite(testTotal) || testTotal === 0);
     const compileIssues = Number(compile?.compile?.compileIssueCount ?? 0);
 
     return {
       content: JSON.stringify({
-        status: compileIssues === 0 && testFailures === 0 && (build?.success ?? true) ? 'passed' : 'failed',
+        status:
+          compileIssues === 0 && testFailures === 0 && !emptyTestRun && (build?.success ?? true)
+            ? 'passed'
+            : 'failed',
+        ...(emptyTestRun
+          ? {
+              reason:
+                'The test run reported ZERO tests — nothing executed, so nothing was verified. ' +
+                'A test assembly that fails to compile is silently left out by Unity.',
+            }
+          : {}),
         summary: {
           compileIssues,
           testFailures,
+          testTotal: Number.isFinite(testTotal) ? testTotal : null,
           buildSuccess: build?.success ?? null,
         },
         evidence,
       }, null, 2),
-      isError: compileIssues > 0 || testFailures > 0 || build?.success === false,
+      isError: compileIssues > 0 || testFailures > 0 || emptyTestRun || build?.success === false,
     };
+    });
   }
 }
 
@@ -669,13 +744,23 @@ async function waitForCompile(
   client: BridgeClient,
   timeoutMs: number,
   pollIntervalMs: number,
+  expectFreshCompile = false,
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
+  // After a recompile REQUEST, the first polls can land before Unity has
+  // started compiling: "idle" then means "not started yet", and returning it
+  // as completed handed back the PREVIOUS compile's verdict as this change's.
+  // Hold a short grace window in which idle keeps polling; a compile observed
+  // in flight ends the grace immediately.
+  const freshGraceUntil = expectFreshCompile ? Date.now() + 3_000 : 0;
+  let sawCompiling = false;
   let lastStatus: CompileStatusResult = {};
 
   while (Date.now() <= deadline) {
     lastStatus = await client.request<CompileStatusResult>('editor.compileStatus', {});
-    if (!lastStatus.isCompiling && !lastStatus.isReloading) {
+    if (lastStatus.isCompiling || lastStatus.isReloading) {
+      sawCompiling = true;
+    } else if (sawCompiling || Date.now() >= freshGraceUntil) {
       return {
         status: 'completed',
         compile: lastStatus,
