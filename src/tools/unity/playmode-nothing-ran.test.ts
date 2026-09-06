@@ -54,10 +54,10 @@ describe('an empty run with a broken build', () => {
     expect(render(new PlaymodeVerifyTool(), COMPILE_LOG)).toContain('no test executed');
   });
 
-  it('keeps the original wording when the build is fine', () => {
+  it('names the empty unfiltered run when the build is fine', () => {
     const out = render(new PlaymodeVerifyTool(), 'Compilation succeeded\nNothing to report');
 
-    expect(out).toContain('the filter matched nothing');
+    expect(out).toContain('found ZERO PlayMode tests');
     expect(out).not.toContain('does not compile');
   });
 

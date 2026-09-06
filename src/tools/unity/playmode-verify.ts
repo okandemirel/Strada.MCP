@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { describeEmptyRun, findPlayModeTestAssemblies } from './playmode-empty-run.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
 import { parseTestRun, failedTests, playmodeVerdict } from './nunit-results.js';
@@ -282,6 +283,9 @@ export class PlaymodeVerifyTool implements ITool {
             log,
             typeof input['testFilter'] === 'string' ? input['testFilter'] : undefined,
             typeof input['categories'] === 'string' ? input['categories'] : undefined,
+            // Only an empty run needs to know what the project holds; the scan
+            // is cheap but a passing run has nothing to explain.
+            verdict.reason === 'nothing-ran' ? findPlayModeTestAssemblies(projectPath) : undefined,
           ) +
           shape.suffix +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)),
@@ -423,6 +427,7 @@ export class PlaymodeVerifyTool implements ITool {
     log: string,
     filter?: string,
     categories?: string,
+    testAssemblies?: readonly string[],
   ): string {
     const lines: string[] = [];
 
@@ -439,10 +444,7 @@ export class PlaymodeVerifyTool implements ITool {
           ...compileErrors.map((e) => `  ${e}`),
         );
       } else {
-        lines.push(
-          'PlayMode verification FAILED: no test executed. An empty run is not a pass — ' +
-          'the project has no PlayMode tests, or the filter matched nothing.',
-        );
+        lines.push(describeEmptyRun(outcome, filter, categories, testAssemblies));
       }
     } else if (reason === 'tests-failed') {
       lines.push(
