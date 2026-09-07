@@ -27,7 +27,9 @@ export class MyAssetsTool implements ITool {
     '"My Assets"), by keyword, and optionally list the files inside a package. Use this BEFORE ' +
     'generating or importing any art, model, texture or tool asset: a package the user already ' +
     'owns beats one that has to be made. Reads the local download cache, so it needs no Unity ' +
-    'Editor, no login and no network.';
+    'Editor, no login and no network. It sees ONLY packages already downloaded to this machine; ' +
+    "the user's full purchased library (hundreds of packages when linked) is unity_my_assets_cloud " +
+    "(actions purchases / search / download) — ask it before concluding nothing owned fits.";
 
   readonly inputSchema = {
     type: 'object',
@@ -74,8 +76,9 @@ export class MyAssetsTool implements ITool {
           'No downloaded Asset Store packages found. Looked in:\n' +
           roots.map((r) => `  ${r}`).join('\n') +
           '\n\nThe cache only holds packages the user has downloaded at least once, so an empty ' +
-          'result means nothing is available locally — not that the user owns nothing. Generate ' +
-          'or import what is needed.',
+          'result means nothing is available locally — not that the user owns nothing. The full ' +
+          "purchased library is unity_my_assets_cloud (action 'purchases' or 'search', then 'download' " +
+          'and unity_import_asset_package); generate only when that has nothing either.',
         isError: false,
       };
     }
@@ -91,7 +94,9 @@ export class MyAssetsTool implements ITool {
         content:
           `None of the user's ${packages.length} downloaded packages matches "${query}". ` +
           `They have: ${packages.map((p) => p.name).join('; ')}.\n\n` +
-          'Nothing here fits, so generating or importing is the right call.',
+          "Nothing downloaded fits. Measured 2026-09-07: this answer ended a sprint's search while the " +
+          "account held 511 purchased packages — the full library is unity_my_assets_cloud (action 'purchases' " +
+          "or 'search', then 'download' and unity_import_asset_package). Generate only when that has nothing either.",
         isError: false,
       };
     }
