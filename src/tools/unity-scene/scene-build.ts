@@ -41,7 +41,9 @@ export class SceneBuildTool implements ITool {
           '  1. an asset of type Strada.Core.Bootstrap.GameBootstrapperConfig\n' +
           '  2. an object with a Strada.Core.Bootstrap.GameBootstrapper component\n' +
           '  3. that component\'s _gameConfig field, kind "reference", pointing at the asset id\n' +
-          'Example: {"assets":[{"id":"cfg","type":"Strada.Core.Bootstrap.GameBootstrapperConfig",' +
+          'Example (scene.path is REQUIRED — measured 2026-09-07: two calls failed for lacking it): ' +
+          '{"scene":{"path":"Assets/Scenes/Main.unity","addToBuildSettings":true},' +
+          '"assets":[{"id":"cfg","type":"Strada.Core.Bootstrap.GameBootstrapperConfig",' +
           '"path":"Assets/Settings/Bootstrap.asset","fields":[]}],' +
           '"objects":[{"id":"boot","name":"GameBootstrapper","components":[{' +
           '"type":"Strada.Core.Bootstrap.GameBootstrapper","fields":[' +
