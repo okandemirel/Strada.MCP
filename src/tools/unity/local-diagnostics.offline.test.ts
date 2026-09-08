@@ -148,6 +148,57 @@ describe('offline compile status', () => {
     expect(status.compile.compileIssueCount).toBeGreaterThan(0);
   });
 
+  it("counts DISTINCT errors: a warning with a CS code, a repeated CS line and the section header are not four more errors (measured 2026-09-08: one error reported as seven)", async () => {
+    const unity = join(projectPath, 'FakeUnity');
+    writeFileSync(unity, '#!/bin/sh\n');
+    process.env['UNITY_EDITOR_PATH'] = unity;
+    rmSync(editorLogPath, { force: true });
+
+    const pass = [
+      "Assets/Modules/RocketModule/Scripts/Services/RocketService.cs(19,21): warning CS0108: 'RocketService.IsInitialized' hides inherited member 'Base.IsInitialized'. Use the new keyword if hiding was intended.",
+      "Assets/Modules/RocketModule/Scripts/RocketModuleConfig.cs(13,17): error CS1061: 'IModuleBuilder' does not contain a definition for 'RegisterSystem'",
+      "## Script Compilation Error for: Csc Library/Bee/artifacts/200b0aE.dag/Game.Modules.Rocket.dll (+2 others)",
+      "UnityEditor.Scripting.ScriptCompilation.EditorCompilationInterface:EmitExceptionAsError<UnityEditor.Scripting.ScriptCompilation.EditorCompilation/CompileStatus> (System.Func`1<T>) (at /Users/bokken/build/output/unity/unity/Editor/Mono/Scripting/ScriptCompilation/EditorCompilationInterface.cs:41)",
+      "UnityEditor.Scripting.ScriptCompilation.EditorCompilationInterface:CompileScripts (UnityEditor.Scripting.ScriptCompilation.EditorScriptCompilationOptions,UnityEditor.BuildTarget,int,string[]) (at /Users/bokken/build/output/unity/unity/Editor/Mono/Scripting/ScriptCompilation/EditorCompilationInterface.cs:186)",
+    ];
+    execFileMock.mockImplementation((file: string, _args: string[], _opts: unknown, cb: Function) => {
+      if (file === unity) {
+        // Unity compiles more than once per batch run; each pass restates the same diagnostics.
+        cb(Object.assign(new Error('exit 1'), { code: 1, stdout: `${[...pass, ...pass].join('\n')}\n`, stderr: '' }));
+        return;
+      }
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
+
+    expect(status.source).toBe('static_unity_batch');
+    expect(status.compile.lastSucceeded).toBe(false);
+    expect(status.diagnostics?.errorCount).toBe(1);
+    expect(status.diagnostics?.warningCount).toBe(1);
+    const entries = (status.diagnostics as { entries?: Array<{ type: string; message: string }> }).entries ?? [];
+    expect(entries.find((e) => e.message.includes('warning CS0108'))?.type).toBe('warning');
+    expect(entries.find((e) => e.message.startsWith('## Script Compilation Error'))?.type).toBe('log');
+    expect(entries.find((e) => e.message.includes('error CS1061'))?.type).toBe('error');
+  });
+
+  it("keeps the section header red when it is the only thing that says the compile failed", async () => {
+    const unity = join(projectPath, 'FakeUnity');
+    writeFileSync(unity, '#!/bin/sh\n');
+    process.env['UNITY_EDITOR_PATH'] = unity;
+    rmSync(editorLogPath, { force: true });
+    execFileMock.mockImplementation((file: string, _args: string[], _opts: unknown, cb: Function) => {
+      if (file === unity) {
+        cb(Object.assign(new Error('exit 1'), { code: 1, stdout: "## Script Compilation Error for: Csc Library/Bee/artifacts/x.dag/Game.dll\n", stderr: '' }));
+        return;
+      }
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
+    expect(status.compile.lastSucceeded).toBe(false);
+    expect(status.diagnostics?.errorCount).toBe(1);
+  });
+
   it("reports unknown when headless Unity produces no diagnostics at all", async () => {
     // A licence failure or timeout yields an empty log. That is "unknown", and
     // reporting it as a clean compile is the exact bug this file exists for.

@@ -49,6 +49,21 @@ export function errorsFirst(entries: readonly ConsoleLogEntry[]): ConsoleLogEntr
   return [...entries].sort((a, b) => rank(a) - rank(b));
 }
 
+/**
+ * How many DISTINCT errors a compile produced.
+ *
+ * Measured 2026-09-08 on PixelFlow: one `error CS1061` came back as
+ * `errorCount: 7`. The raw count took every line typed 'error' — the CS line
+ * once per compile pass, `warning CS0108` (a warning classified as an error
+ * because it carried a CS code), and the `## Script Compilation Error for:`
+ * section header. The real-tree guardian sized its repair by that number, and
+ * the fix task was told there were seven errors and went looking for six that
+ * did not exist.
+ */
+export function countCompileErrors(entries: readonly ConsoleLogEntry[]): number {
+  return distinctCompileEntries(entries).filter((entry) => isErrorType(entry.type)).length;
+}
+
 export function distinctCompileEntries(entries: readonly ConsoleLogEntry[]): ConsoleLogEntry[] {
   const seen = new Set<string>();
   const out: ConsoleLogEntry[] = [];
@@ -240,8 +255,8 @@ export async function getStaticCompileStatus(
     ? await tryUnityBatchCompile(options.projectPath)
     : null;
   if (batchSnapshot) {
-    const errorCount = batchSnapshot.entries.filter((entry) => isErrorType(entry.type)).length;
-    const warningCount = batchSnapshot.entries.filter(
+    const errorCount = countCompileErrors(batchSnapshot.entries);
+    const warningCount = distinctCompileEntries(batchSnapshot.entries).filter(
       (entry) => String(entry.type).toLowerCase() === 'warning',
     ).length;
     return {
@@ -599,8 +614,10 @@ async function tryUnityBatchCompile(projectPath: string): Promise<UnityBatchSnap
   }
 
   const lines = `${stdout}\n${stderr}`.split(/\r?\n/);
-  const entries = parseConsoleEntries(lines, false).filter((entry) => isCompileRelatedEntry(entry));
-  const errorCount = entries.filter((entry) => isErrorType(entry.type)).length;
+  const entries = demoteCompileErrorHeaders(
+    parseConsoleEntries(lines, false).filter((entry) => isCompileRelatedEntry(entry)),
+  );
+  const errorCount = countCompileErrors(entries);
 
   return {
     entries,
@@ -880,6 +897,12 @@ function classifyLineType(line: string): string {
     return /\bassert\b/i.test(line) ? 'assert' : 'exception';
   }
 
+  // `warning CS0108: ... hides inherited member` carries a CS code and is a
+  // warning; the code alone used to make it an error.
+  if (/\bwarning\b/i.test(line) && !/\berror\b/i.test(line)) {
+    return 'warning';
+  }
+
   if (/\berror\b/i.test(line) || /\bCS\d{4}\b/.test(line)) {
     return 'error';
   }
@@ -901,6 +924,21 @@ function classifyLineType(line: string): string {
   }
 
   return 'log';
+}
+
+/**
+ * `## Script Compilation Error for: Csc …/Game.Modules.Rocket.dll` is the
+ * section header Unity prints above the diagnostics of one assembly. It names
+ * no cause of its own, so when the diagnostics that follow it are present it
+ * is a heading, not an error. It stays an error only when nothing else
+ * explains the failure — a red compile must still carry a red entry.
+ */
+function demoteCompileErrorHeaders(entries: ConsoleLogEntry[]): ConsoleLogEntry[] {
+  const isHeader = (entry: ConsoleLogEntry): boolean =>
+    /^##\s*Script Compilation Error for:/i.test(entry.message ?? '');
+  const hasOtherError = entries.some((entry) => isErrorType(entry.type) && !isHeader(entry));
+  if (!hasOtherError) return entries;
+  return entries.map((entry) => (isHeader(entry) ? { ...entry, type: 'log' } : entry));
 }
 
 function parseLocation(line: string): { file: string | null; line: number | null } {
