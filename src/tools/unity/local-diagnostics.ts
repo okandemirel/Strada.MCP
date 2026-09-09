@@ -617,6 +617,35 @@ async function tryUnityBatchCompile(projectPath: string): Promise<UnityBatchSnap
   const entries = demoteCompileErrorHeaders(
     parseConsoleEntries(lines, false).filter((entry) => isCompileRelatedEntry(entry)),
   );
+  // A non-zero exit with no compiler diagnostic is still a failure — of the
+  // run, not the code. Carry Unity's last words so the verdict names a cause
+  // ("Multiple Unity instances cannot open the same project", a licence
+  // refusal, a vanished directory) instead of "failed with 0 error(s)".
+  if (exitCode !== 0 && countCompileErrors(entries) === 0) {
+    const tail = lines.map((l) => l.trim()).filter((l) => l.length > 0).slice(-3).join(' | ');
+    // Measured 2026-09-09 05:07: a sub-agent's workspace was released under a
+    // running verify; Unity ran on the vanishing directory. The one fact that
+    // explains that outcome is the missing project root.
+    const projectVersionPath = path.join(projectPath, 'ProjectSettings', 'ProjectVersion.txt');
+    let projectRootNote = '';
+    try {
+      await access(projectVersionPath);
+    } catch {
+      projectRootNote =
+        ` ${projectVersionPath} is missing, so ${projectPath} is not a Unity project root` +
+        ' (a partial or already-released workspace copy?).';
+    }
+    entries.push({
+      type: 'error',
+      message:
+        `Script compilation did not produce a verdict: Unity exited ${exitCode} without compiler diagnostics.` +
+        projectRootNote +
+        (tail ? ` Last output: ${tail}` : ' No output at all.'),
+      file: null,
+      line: null,
+      timestamp: Date.now(),
+    });
+  }
   const errorCount = countCompileErrors(entries);
 
   return {

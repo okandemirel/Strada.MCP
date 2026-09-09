@@ -199,6 +199,46 @@ describe('offline compile status', () => {
     expect(status.diagnostics?.errorCount).toBe(1);
   });
 
+  it("names the cause when Unity exits non-zero without compiler diagnostics (measured 2026-09-09: 'failed with 0 error(s)')", async () => {
+    const unity = join(projectPath, 'FakeUnity');
+    writeFileSync(unity, '#!/bin/sh\n');
+    process.env['UNITY_EDITOR_PATH'] = unity;
+    rmSync(editorLogPath, { force: true });
+    execFileMock.mockImplementation((file: string, _args: string[], _opts: unknown, cb: Function) => {
+      if (file === unity) {
+        cb(Object.assign(new Error('exit 1'), { code: 1, stdout: "Mono: successfully reloaded assembly\nMultiple Unity instances cannot open the same project.\n", stderr: '' }));
+        return;
+      }
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
+    expect(status.compile.lastSucceeded).toBe(false);
+    expect(status.diagnostics?.errorCount).toBe(1);
+    const entries = (status.diagnostics as { entries?: Array<{ type: string; message: string }> }).entries ?? [];
+    const cause = entries.find((e) => e.type === 'error')!;
+    expect(cause.message).toContain('exited 1 without compiler diagnostics');
+    expect(cause.message).toContain('Multiple Unity instances cannot open the same project');
+  });
+
+  it("says when the directory is not a Unity project root instead of blaming a timeout", async () => {
+    const unity = join(projectPath, 'FakeUnity');
+    writeFileSync(unity, '#!/bin/sh\n');
+    process.env['UNITY_EDITOR_PATH'] = unity;
+    rmSync(editorLogPath, { force: true });
+    rmSync(join(projectPath, 'ProjectSettings', 'ProjectVersion.txt'), { force: true });
+    execFileMock.mockImplementation((file: string, _args: string[], _opts: unknown, cb: Function) => {
+      if (file === unity) {
+        cb(Object.assign(new Error('exit 1'), { code: 1, stdout: "Loading project ...\n", stderr: '' }));
+        return;
+      }
+      cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    });
+    const status = await getStaticCompileStatus({ projectPath, allowHeadlessCompile: true });
+    expect(status.compile.lastSucceeded).toBe(false);
+    const entries = (status.diagnostics as { entries?: Array<{ type: string; message: string }> }).entries ?? [];
+    expect(entries.some((e) => /ProjectVersion\.txt is missing/.test(e.message) && /not a Unity project root/.test(e.message))).toBe(true);
+  });
+
   it("reports unknown when headless Unity produces no diagnostics at all", async () => {
     // A licence failure or timeout yields an empty log. That is "unknown", and
     // reporting it as a clean compile is the exact bug this file exists for.
