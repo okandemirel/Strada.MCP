@@ -50,6 +50,7 @@ import {
   UiQueryTool, UiActionTool, InputSimulateTool, CameraManageTool,
   GraphicsManageTool, AddressablesManageTool, ImportSettingsManageTool,
 } from './tools/unity/index.js';
+import { PlaythroughTool } from './tools/unity/playthrough.js';
 import {
   SceneCreateTool, SceneOpenTool, SceneSaveTool, SceneInfoTool,
   SceneAnalyzeTool, PrefabCreateTool, PrefabInstantiateTool, PrefabAnalyzeTool,
@@ -211,6 +212,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new SetParentTool(),
     new PlayModeTool(),
     new PlaymodeVerifyTool(),
+    new PlaythroughTool(),
     new MyAssetsTool(),
     new ImportAssetPackageTool(),
     new GetPlayStateTool(),

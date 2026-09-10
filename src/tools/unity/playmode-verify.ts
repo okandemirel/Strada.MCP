@@ -313,7 +313,10 @@ export class PlaymodeVerifyTool implements ITool {
   private renderCapture(captureDir: string, log: string): string {
     let frames: string[] = [];
     try {
-      frames = readdirSync(captureDir).filter((f) => f.endsWith('.png')).sort();
+      // Only this run's frames. The pre-run cleanup removes frame_*.png and
+      // nothing else, so a playfield_*.png left by an earlier hand-written test
+      // used to survive it and be counted — and reported — as this recording.
+      frames = readdirSync(captureDir).filter((f) => /^frame_\d+\.png$/.test(f)).sort();
     } catch { /* reported as none */ }
 
     if (frames.length === 0) {
@@ -513,6 +516,18 @@ export class PlaymodeVerifyTool implements ITool {
     timeoutMs: number,
     env: Record<string, string> = {},
   ): Promise<number> {
+    return runUnityProcess(binary, args, timeoutMs, env);
+  }
+}
+
+/** Run the Unity binary to completion (or SIGKILL at the deadline) and answer its exit code. */
+export function runUnityProcess(
+  binary: string,
+  args: string[],
+  timeoutMs: number,
+  env: Record<string, string> = {},
+): Promise<number> {
+  {
     return new Promise((resolve) => {
       const child = spawn(binary, args, {
         stdio: 'ignore',
