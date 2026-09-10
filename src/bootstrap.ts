@@ -51,6 +51,7 @@ import {
   GraphicsManageTool, AddressablesManageTool, ImportSettingsManageTool,
 } from './tools/unity/index.js';
 import { PlaythroughTool } from './tools/unity/playthrough.js';
+import { BuildPlayerTool } from './tools/unity/build-player.js';
 import {
   SceneCreateTool, SceneOpenTool, SceneSaveTool, SceneInfoTool,
   SceneAnalyzeTool, PrefabCreateTool, PrefabInstantiateTool, PrefabAnalyzeTool,
@@ -213,6 +214,7 @@ export function bootstrap(options: BootstrapOptions): BootstrapResult {
     new PlayModeTool(),
     new PlaymodeVerifyTool(),
     new PlaythroughTool(),
+    new BuildPlayerTool(),
     new MyAssetsTool(),
     new ImportAssetPackageTool(),
     new GetPlayStateTool(),
