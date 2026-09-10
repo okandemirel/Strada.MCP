@@ -29,7 +29,7 @@ describe('MCP Server Integration', () => {
     expect(toolRegistry.getAll().length).toBeGreaterThanOrEqual(60);
     expect(resourceRegistry.getAll().length).toBe(15);
     expect(promptRegistry.getAll().length).toBe(6);
-  });
+  }, 30_000); // bootstrap registers 100+ tools; 5–8 s alone, over 10 s under machine load (measured 2026-09-10)
 
   it('should allow registering tools to the registry', () => {
     const { toolRegistry } = createMcpServer();
