@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describeEmptyRun, findPlayModeTestAssemblies } from './playmode-empty-run.js';
@@ -266,6 +266,23 @@ export class PlaymodeVerifyTool implements ITool {
 
       const exceptions = this.playModeExceptions(log);
       const verdict = playmodeVerdict(outcome, exceptions);
+      // The run as the NUnit file states it, for whoever judges delivery: the
+      // counts, the failing names, and whether a filter narrowed the suite —
+      // read from the arguments, not from a word in this tool's prose.
+      writePlaymodeRunRecord(projectPath, {
+        measuredAt: new Date().toISOString(),
+        result: outcome.result,
+        total: outcome.total,
+        passed: outcome.passed,
+        failed: outcome.failed,
+        skipped: outcome.skipped,
+        failedNames: failedTests(xml, 50).map((t) => t.name),
+        filter: typeof input['testFilter'] === 'string' && input['testFilter'].trim() ? input['testFilter'].trim() : null,
+        categories: typeof input['categories'] === 'string' && input['categories'].trim() ? input['categories'].trim() : null,
+        exceptions: exceptions.length,
+        exitCode,
+        reason: verdict.reason,
+      });
 
       // A test assembly that does not compile is not reported as a failure —
       // Unity leaves it out and the tests that DID build pass. See
@@ -517,6 +534,42 @@ export class PlaymodeVerifyTool implements ITool {
     env: Record<string, string> = {},
   ): Promise<number> {
     return runUnityProcess(binary, args, timeoutMs, env);
+  }
+}
+
+/** Where the last PlayMode run's NUnit-derived record goes, relative to the project. */
+export const PLAYMODE_RUN_RECORD_REL = join('Recordings', 'tests', 'playmode-last.json');
+
+export interface PlaymodeRunRecord {
+  readonly measuredAt: string;
+  readonly result: string;
+  readonly total: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly skipped: number;
+  readonly failedNames: string[];
+  /** The -testFilter given, or null: the suite was not narrowed by name. */
+  readonly filter: string | null;
+  readonly categories: string | null;
+  readonly exceptions: number;
+  readonly exitCode: number;
+  readonly reason: string;
+}
+
+/**
+ * Write the record beside the project's other evidence. The delivery gate in
+ * Strada.Brain used to derive "green" and "unfiltered" from this tool's prose
+ * with regexes (2026-09-10); the NUnit counts are the verdict, and whether a
+ * filter was applied is a fact of the call, not a word in a sentence.
+ * Best-effort: a project that cannot be written to still gets its prose.
+ */
+export function writePlaymodeRunRecord(projectPath: string, record: PlaymodeRunRecord): void {
+  try {
+    const path = join(projectPath, PLAYMODE_RUN_RECORD_REL);
+    mkdirSync(join(projectPath, 'Recordings', 'tests'), { recursive: true });
+    writeFileSync(path, JSON.stringify({ ...record, unfiltered: record.filter === null && record.categories === null }, null, 2));
+  } catch {
+    /* the prose still carries the run */
   }
 }
 
