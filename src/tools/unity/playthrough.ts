@@ -39,6 +39,8 @@ export const MIN_MOTION_SHARE = 0.01;
 
 /** What the generated test records (see playthrough-test.ts); field names are the JSON's. */
 export interface PlaythroughRecord {
+  /** "player" when Strada.Core's PlayerPlaythroughRunner wrote it inside a built player; absent/other = the editor test. */
+  medium?: string;
   scene: string;
   session: number;
   driverType?: string;
@@ -85,8 +87,10 @@ export interface SessionRecord {
  * -batchmode with a real graphics device, not the shipped player. Boot time
  * and hitches transfer; the average frame rate is a floor, not the player's.
  */
+export type PlaythroughMedium = 'editor-playmode-batch' | 'player';
+
 export interface PlaythroughPerf {
-  readonly medium: 'editor-playmode-batch';
+  readonly medium: PlaythroughMedium;
   readonly bootSeconds?: number;
   readonly playSeconds: number;
   readonly playFrames: number;
@@ -102,7 +106,7 @@ export function perfFromRecord(record: PlaythroughRecord | null): PlaythroughPer
   const boot = typeof record.bootSeconds === 'number' && record.bootSeconds >= 0 ? record.bootSeconds : undefined;
   if (playSeconds === 0 && boot === undefined) return undefined;
   return {
-    medium: 'editor-playmode-batch',
+    medium: record.medium === 'player' ? 'player' : 'editor-playmode-batch',
     ...(boot !== undefined ? { bootSeconds: boot } : {}),
     playSeconds,
     playFrames,
@@ -303,7 +307,8 @@ export function renderPerf(p: PlaythroughPerf): string {
     parts.push(`${p.playFrames} frames in ${p.playSeconds.toFixed(1)} s = ${p.avgFps.toFixed(1)} fps average`);
   } else if (p.playSeconds > 0) parts.push(`${p.playSeconds.toFixed(1)} s of play, no frame timing recorded`);
   if (p.worstFrameMs !== undefined) parts.push(`worst frame ${p.worstFrameMs.toFixed(0)} ms`);
-  return `Performance (editor play mode, batch — not the shipped player): ${parts.join('; ')}.`;
+  const where = p.medium === 'player' ? 'built player, real rendering' : 'editor play mode, batch — not the shipped player';
+  return `Performance (${where}): ${parts.join('; ')}.`;
 }
 
 export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): string {
