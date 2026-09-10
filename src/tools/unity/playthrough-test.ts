@@ -59,6 +59,12 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         public bool reachedOutcome;
         public int framesCaptured;
         public float elapsedSeconds;
+        /// <summary>Scene load start → GameBootstrapper.Services published.</summary>
+        public float bootSeconds = -1f;
+        /// <summary>Wall time and frame count of the play loop; frames right after a capture (a GPU read-back stall) are not counted.</summary>
+        public float playSeconds;
+        public int playFrames;
+        public float worstFrameMs;
         public List<string> errors = new List<string>();
     }
 
@@ -117,6 +123,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 record.missing = "scene " + record.scene + " is not in Build Settings";
                 Assert.Fail(record.missing);
             }
+            var loadStarted = Time.realtimeSinceStartup;
             yield return SceneManager.LoadSceneAsync(record.scene, LoadSceneMode.Single);
 
             // A headless first boot loads the scene, imports what the editor
@@ -126,6 +133,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             var bootDeadline = Time.realtimeSinceStartup + bootSeconds;
             while (Time.realtimeSinceStartup < bootDeadline && GameBootstrapper.Services == null)
                 yield return null;
+            if (GameBootstrapper.Services != null) record.bootSeconds = Time.realtimeSinceStartup - loadStarted;
             if (GameBootstrapper.Services == null)
             {
                 record.missing = "GameBootstrapper.Services stayed null for " + bootSeconds + " s — the entry scene holds no GameBootstrapper, or its config is unassigned, or a module threw while starting";
@@ -184,10 +192,20 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             yield return null;
 
             var playDeadline = Time.realtimeSinceStartup + deadlineSeconds;
+            var playStarted = Time.realtimeSinceStartup;
             var frame = 0;
             var last = "";
+            var skipDelta = true; // the first delta belongs to StartSession's frame
             while (Time.realtimeSinceStartup < playDeadline)
             {
+                if (!skipDelta)
+                {
+                    var ms = Time.unscaledDeltaTime * 1000f;
+                    record.playFrames++;
+                    record.playSeconds += Time.unscaledDeltaTime;
+                    if (ms > record.worstFrameMs) record.worstFrameMs = ms;
+                }
+                skipDelta = false;
                 var phase = Phase(driver);
                 if (phase != last) { record.phasesSeen.Add(phase); last = phase; }
                 PlaythroughOutcome outcome;
@@ -205,8 +223,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 }
                 yield return null;
                 frame++;
-                if (frame % FramesBetweenCaptures == 0) Capture(record, captureDir, camera, target, readback);
+                if (frame % FramesBetweenCaptures == 0) { Capture(record, captureDir, camera, target, readback); skipDelta = true; }
             }
+            if (record.playFrames == 0) record.playSeconds = Time.realtimeSinceStartup - playStarted;
             if (!record.reachedOutcome) record.outcome = "None";
             Capture(record, captureDir, camera, target, readback);
 

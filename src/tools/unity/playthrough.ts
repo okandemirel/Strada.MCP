@@ -56,7 +56,45 @@ export interface PlaythroughRecord {
   reachedOutcome: boolean;
   framesCaptured: number;
   elapsedSeconds: number;
+  /** Scene load start → services published; absent or negative when the bootstrapper never published. */
+  bootSeconds?: number;
+  /** Play-loop wall time and counted frames (frames right after a capture stall are not counted). */
+  playSeconds?: number;
+  playFrames?: number;
+  worstFrameMs?: number;
   errors: string[];
+}
+
+/**
+ * What the run measured about speed. `medium` names the conditions, because
+ * a number without them is a guess: this is the EDITOR in play mode under
+ * -batchmode with a real graphics device, not the shipped player. Boot time
+ * and hitches transfer; the average frame rate is a floor, not the player's.
+ */
+export interface PlaythroughPerf {
+  readonly medium: 'editor-playmode-batch';
+  readonly bootSeconds?: number;
+  readonly playSeconds: number;
+  readonly playFrames: number;
+  readonly avgFps?: number;
+  readonly worstFrameMs?: number;
+}
+
+/** Performance from the record; undefined when the run never reached the play loop. */
+export function perfFromRecord(record: PlaythroughRecord | null): PlaythroughPerf | undefined {
+  if (record === null) return undefined;
+  const playSeconds = typeof record.playSeconds === 'number' && record.playSeconds > 0 ? record.playSeconds : 0;
+  const playFrames = typeof record.playFrames === 'number' && record.playFrames > 0 ? record.playFrames : 0;
+  const boot = typeof record.bootSeconds === 'number' && record.bootSeconds >= 0 ? record.bootSeconds : undefined;
+  if (playSeconds === 0 && boot === undefined) return undefined;
+  return {
+    medium: 'editor-playmode-batch',
+    ...(boot !== undefined ? { bootSeconds: boot } : {}),
+    playSeconds,
+    playFrames,
+    ...(playFrames > 0 && playSeconds > 0 ? { avgFps: playFrames / playSeconds } : {}),
+    ...(typeof record.worstFrameMs === 'number' && record.worstFrameMs > 0 ? { worstFrameMs: record.worstFrameMs } : {}),
+  };
 }
 
 export interface PlaythroughVerdict {
@@ -75,6 +113,8 @@ export interface PlaythroughVerdict {
   };
   /** What the NUnit run said, when there was one. */
   readonly test?: { total: number; passed: number; failed: number; result: string };
+  /** Boot time and frame timing of the run, when it reached the play loop. */
+  readonly perf?: PlaythroughPerf;
   /**
    * Error/exception lines from Unity's own log for the run (last 30). The
    * test's record only sees what is logged after it subscribes; a bootstrap
@@ -207,9 +247,21 @@ export function judgePlaythrough(
       ...(last ? { last } : {}),
     },
     ...(test ? { test } : {}),
+    ...((() => { const perf = perfFromRecord(record); return perf ? { perf } : {}; })()),
     ...(unityLog !== undefined ? { unityLog: unityLogFailureLines(unityLog) } : {}),
     measuredAt: new Date().toISOString(),
   };
+}
+
+/** One line, naming the medium: numbers from the batch editor are not the player's. */
+export function renderPerf(p: PlaythroughPerf): string {
+  const parts: string[] = [];
+  if (p.bootSeconds !== undefined) parts.push(`boot ${p.bootSeconds.toFixed(1)} s to services`);
+  if (p.playFrames > 0 && p.avgFps !== undefined) {
+    parts.push(`${p.playFrames} frames in ${p.playSeconds.toFixed(1)} s = ${p.avgFps.toFixed(1)} fps average`);
+  } else if (p.playSeconds > 0) parts.push(`${p.playSeconds.toFixed(1)} s of play, no frame timing recorded`);
+  if (p.worstFrameMs !== undefined) parts.push(`worst frame ${p.worstFrameMs.toFixed(0)} ms`);
+  return `Performance (editor play mode, batch — not the shipped player): ${parts.join('; ')}.`;
 }
 
 export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): string {
@@ -237,6 +289,7 @@ export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): 
         : '') +
       `. Under ${captureDir}.`,
   );
+  if (verdict.perf) lines.push(renderPerf(verdict.perf));
   if (verdict.test) lines.push(`Test runner: ${verdict.test.result}, ${verdict.test.total} executed, ${verdict.test.failed} failed.`);
   if (verdict.unityLog && verdict.unityLog.length > 0) {
     lines.push(`Unity log, failure lines (${verdict.unityLog.length}):\n  ${verdict.unityLog.slice(-12).join('\n  ')}`);
@@ -251,6 +304,7 @@ export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): 
       record: verdict.record,
       frames: verdict.frames,
       test: verdict.test ?? null,
+      perf: verdict.perf ?? null,
       unityLog: verdict.unityLog ?? [],
       measuredAt: verdict.measuredAt,
     }),

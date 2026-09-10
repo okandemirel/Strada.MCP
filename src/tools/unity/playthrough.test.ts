@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
+import { perfFromRecord, judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
 import { buildPlaythroughTest, emitPlaythroughTest, PLAYTHROUGH_ASSEMBLY, PLAYTHROUGH_DRIVER_TYPE } from './playthrough-test.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 
@@ -49,6 +49,29 @@ describe('the play-through verdict is derived from the record, the pixels and th
     expect(v.frames.maxMotionShare).toBeGreaterThan(MIN_MOTION_SHARE);
     expect(renderVerdict(v, dir)).toContain('PLAY-THROUGH OK');
     expect(renderVerdict(v, dir)).toContain('starts play by itself: no');
+  });
+
+  it('boot time and frame timing ride in the verdict, named by their medium', () => {
+    writeFileSync(
+      join(dir, 'playthrough.json'),
+      JSON.stringify({ ...goodRecord, bootSeconds: 3.25, playSeconds: 4.0, playFrames: 120, worstFrameMs: 210.4 }),
+    );
+    frames(drawn(0), drawn(40), drawn(90));
+    const v = judgePlaythrough(dir, { total: 1, passed: 1, failed: 0, result: 'Passed' });
+    expect(v.perf).toEqual({ medium: 'editor-playmode-batch', bootSeconds: 3.25, playSeconds: 4, playFrames: 120, avgFps: 30, worstFrameMs: 210.4 });
+    const text = renderVerdict(v, dir);
+    expect(text).toContain('Performance (editor play mode, batch — not the shipped player): boot 3.3 s to services; 120 frames in 4.0 s = 30.0 fps average; worst frame 210 ms.');
+    expect(JSON.parse(text.slice(text.indexOf('```json') + 7, text.lastIndexOf('```'))).perf).toMatchObject({ avgFps: 30 });
+  });
+
+  it('a record from an older test, or a run that never reached play, carries no performance', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify(goodRecord));
+    frames(drawn(0), drawn(40));
+    const v = judgePlaythrough(dir);
+    expect(v.perf).toBeUndefined();
+    expect(renderVerdict(v, dir)).not.toContain('Performance');
+    expect(perfFromRecord({ ...goodRecord, bootSeconds: -1, playSeconds: 0, playFrames: 0 })).toBeUndefined();
+    expect(perfFromRecord({ ...goodRecord, bootSeconds: 2, playSeconds: 0, playFrames: 0 })).toEqual({ medium: 'editor-playmode-batch', bootSeconds: 2, playSeconds: 0, playFrames: 0 });
   });
 
   it('a session that never ended is not ok, and the reason names the actions and the phases', () => {
