@@ -75,7 +75,27 @@ export interface PlaythroughVerdict {
   };
   /** What the NUnit run said, when there was one. */
   readonly test?: { total: number; passed: number; failed: number; result: string };
+  /**
+   * Error/exception lines from Unity's own log for the run (last 30). The
+   * test's record only sees what is logged after it subscribes; a bootstrap
+   * that refuses in a RuntimeInitializeOnLoad hook, or a config that fails
+   * validation, says why HERE and nowhere the record can reach (measured
+   * 2026-09-10: "Services stayed null for 30 s", record.errors empty, the
+   * cause in the editor log).
+   */
+  readonly unityLog?: string[];
   readonly measuredAt: string;
+}
+
+/** The lines of a Unity log that name a failure, newest last, at most `max`. */
+export function unityLogFailureLines(log: string, max = 30): string[] {
+  const out: string[] = [];
+  for (const line of log.split('\n')) {
+    if (/\b(error CS\d+|Exception|NullReference|Validation failed|failed to|could not|not found|Assertion failed|\[Error\]|\bError\b)/i.test(line) && !/warning CS/i.test(line)) {
+      out.push(line.trim().slice(0, 300));
+    }
+  }
+  return out.slice(-max);
 }
 
 /** The first enabled scene in Build Settings, by name; null when none is enabled or the file is unreadable. */
@@ -103,6 +123,7 @@ export function entrySceneFromBuildSettings(projectPath: string): string | null 
 export function judgePlaythrough(
   captureDir: string,
   test?: { total: number; passed: number; failed: number; result: string },
+  unityLog?: string,
 ): PlaythroughVerdict {
   const reasons: string[] = [];
   let record: PlaythroughRecord | null = null;
@@ -186,6 +207,7 @@ export function judgePlaythrough(
       ...(last ? { last } : {}),
     },
     ...(test ? { test } : {}),
+    ...(unityLog !== undefined ? { unityLog: unityLogFailureLines(unityLog) } : {}),
     measuredAt: new Date().toISOString(),
   };
 }
@@ -216,6 +238,9 @@ export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): 
       `. Under ${captureDir}.`,
   );
   if (verdict.test) lines.push(`Test runner: ${verdict.test.result}, ${verdict.test.total} executed, ${verdict.test.failed} failed.`);
+  if (verdict.unityLog && verdict.unityLog.length > 0) {
+    lines.push(`Unity log, failure lines (${verdict.unityLog.length}):\n  ${verdict.unityLog.slice(-12).join('\n  ')}`);
+  }
   if (!verdict.ok) lines.push(`Why not ok:\n  - ${verdict.reasons.join('\n  - ')}`);
   lines.push(
     '',
@@ -226,6 +251,7 @@ export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): 
       record: verdict.record,
       frames: verdict.frames,
       test: verdict.test ?? null,
+      unityLog: verdict.unityLog ?? [],
       measuredAt: verdict.measuredAt,
     }),
     '```',
@@ -334,7 +360,7 @@ export class PlaythroughTool implements ITool {
       const exitCode = await runUnityProcess(editor.binary, args, 580_000, env);
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const outcome = existsSync(resultsPath) ? parseTestRun(readFileSync(resultsPath, 'utf8')) : null;
-      const verdict = judgePlaythrough(captureDir, outcome ?? undefined);
+      const verdict = judgePlaythrough(captureDir, outcome ?? undefined, log);
       try {
         writeFileSync(join(captureDir, PLAYTHROUGH_VERDICT_FILE), JSON.stringify(verdict, null, 2));
       } catch {

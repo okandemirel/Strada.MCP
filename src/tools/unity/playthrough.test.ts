@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE } from './playthrough.js';
+import { judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
 import { buildPlaythroughTest, emitPlaythroughTest, PLAYTHROUGH_ASSEMBLY, PLAYTHROUGH_DRIVER_TYPE } from './playthrough-test.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 
@@ -186,3 +186,26 @@ describe('the emitted play-through test', () => {
     expect(readFileSync(join(dir, e.paths[0]!), 'utf8')).toContain('"Entry"');
   });
 });
+
+describe("the verdict carries the failure lines of Unity's own log (measured 2026-09-10: the cause of a dead bootstrap was only there)", () => {
+  it('keeps error lines, drops warnings and chatter, and renders them', () => {
+    const log = [
+      '[Log] [Strada] GameFlowSystem OnInitialize',
+      'Assets/X.cs(3,1): warning CS0168: unused',
+      'GameBootstrapperConfig validation failed: module list empty',
+      'NullReferenceException: Object reference not set to an instance of an object',
+      'plain line',
+    ].join('\n');
+    const lines = unityLogFailureLines(log);
+    expect(lines).toEqual([
+      'GameBootstrapperConfig validation failed: module list empty',
+      'NullReferenceException: Object reference not set to an instance of an object',
+    ]);
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, missing: 'GameBootstrapper.Services stayed null for 30 s', startAccepted: false, reachedOutcome: false }));
+    const v = judgePlaythrough(dir, undefined, log);
+    expect(v.unityLog).toHaveLength(2);
+    expect(renderVerdict(v, dir)).toContain('Unity log, failure lines (2)');
+    expect(renderVerdict(v, dir)).toContain('validation failed: module list empty');
+  });
+});
+
