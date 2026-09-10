@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { perfFromRecord, judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
+import { perfFromRecord, renderSessions, judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
 import { buildPlaythroughTest, emitPlaythroughTest, PLAYTHROUGH_ASSEMBLY, PLAYTHROUGH_DRIVER_TYPE } from './playthrough-test.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 
@@ -72,6 +72,28 @@ describe('the play-through verdict is derived from the record, the pixels and th
     expect(renderVerdict(v, dir)).not.toContain('Performance');
     expect(perfFromRecord({ ...goodRecord, bootSeconds: -1, playSeconds: 0, playFrames: 0 })).toBeUndefined();
     expect(perfFromRecord({ ...goodRecord, bootSeconds: 2, playSeconds: 0, playFrames: 0 })).toEqual({ medium: 'editor-playmode-batch', bootSeconds: 2, playSeconds: 0, playFrames: 0 });
+  });
+
+  it('several sessions: each is judged, the catalog is named, and the top-level mirror is not double-counted', () => {
+    const sessions = [
+      { index: 1, startAccepted: true, phasesSeen: ['Playing', 'Won'], actions: 14, outcome: 'Won', reachedOutcome: true, seconds: 12.1, lastPhase: 'Won' },
+      { index: 2, startAccepted: true, phasesSeen: ['Playing'], actions: 60, outcome: 'None', reachedOutcome: false, seconds: 45.0, lastPhase: 'Playing' },
+      { index: 3, startAccepted: false, phasesSeen: [], actions: 0, outcome: 'None', reachedOutcome: false, seconds: 0, lastPhase: '' },
+    ];
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, sessionCount: 12, sessions }));
+    frames(drawn(0), drawn(40), drawn(90));
+    const v = judgePlaythrough(dir);
+    expect(v.ok).toBe(false);
+    expect(v.reasons).toEqual([
+      'session 2 never ended after 60 actions (phases seen: Playing)',
+      'the driver refused to start session 3',
+    ]);
+    const text = renderVerdict(v, dir);
+    expect(text).toContain('Sessions: catalog 12 session(s); played 3: #1 Won in 14 actions (12.1 s), #2 never ended in 60 actions (45.0 s), #3 refused.');
+    expect(renderSessions({ ...goodRecord, sessionCount: -1 })).toBe(
+      'Sessions: no session catalog registered (Strada.Core.Play.ISessionCatalog) — the level count cannot be measured.',
+    );
+    expect(renderSessions({ ...goodRecord, sessionCount: 3, sessions: [sessions[0]!] })).toBe('Sessions: catalog 3 session(s); played 1: #1 Won in 14 actions (12.1 s).');
   });
 
   it('a session that never ended is not ok, and the reason names the actions and the phases', () => {
@@ -179,7 +201,11 @@ describe('the emitted play-through test', () => {
       'using Strada.Core.Play;',
       'IPlaythroughDriver driver',
       'GameBootstrapper.Services.TryGet(out driver)',
-      'driver.StartSession(record.session)',
+      'driver.StartSession(s.index)',
+      'STRADA_PLAYTHROUGH_SESSIONS',
+      'ISessionCatalog catalog',
+      'GameBootstrapper.Services.TryGet(out catalog)',
+      'record.sessionCount = catalog.SessionCount',
       'driver.Act()',
       'driver.Outcome',
       'driver.IsSessionActive',

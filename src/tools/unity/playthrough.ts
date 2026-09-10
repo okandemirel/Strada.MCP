@@ -30,8 +30,7 @@ import {
   PLAYTHROUGH_DRIVER_TYPE,
   PLAYTHROUGH_RECORD_FILE,
   PLAYTHROUGH_TEST_CLASS,
-  emitPlaythroughTest,
-} from './playthrough-test.js';
+  emitPlaythroughTest, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
 export const PLAYTHROUGH_VERDICT_FILE = 'playthrough-verdict.json';
 export const DEFAULT_CAPTURE_SUBDIR = 'Recordings/playthrough';
@@ -62,7 +61,22 @@ export interface PlaythroughRecord {
   playSeconds?: number;
   playFrames?: number;
   worstFrameMs?: number;
+  /** ISessionCatalog.SessionCount; -1 (or absent) when the game registers no catalog. */
+  sessionCount?: number;
+  /** Every session the run played, in order (absent on records from older tests). */
+  sessions?: SessionRecord[];
   errors: string[];
+}
+
+export interface SessionRecord {
+  index: number;
+  startAccepted: boolean;
+  phasesSeen: string[];
+  actions: number;
+  outcome?: string;
+  reachedOutcome: boolean;
+  seconds: number;
+  lastPhase?: string;
 }
 
 /**
@@ -210,8 +224,20 @@ export function judgePlaythrough(
   const readable = frameFiles.length - unreadable;
 
   if (record !== null) {
+    const sessions = record.sessions && record.sessions.length > 0 ? record.sessions : null;
     if (record.missing) reasons.push(record.missing);
-    else if (!record.startAccepted) reasons.push(`the driver refused to start session ${record.session}`);
+    else if (sessions) {
+      // Several sessions: each is judged; the top-level fields only mirror the first.
+      for (const s of sessions) {
+        if (!s.startAccepted) reasons.push(`the driver refused to start session ${s.index}`);
+        else if (!s.reachedOutcome) {
+          reasons.push(
+            `session ${s.index} never ended after ${s.actions} actions ` +
+              `(phases seen: ${s.phasesSeen.length > 0 ? s.phasesSeen.join(' → ') : 'none'})`,
+          );
+        }
+      }
+    } else if (!record.startAccepted) reasons.push(`the driver refused to start session ${record.session}`);
     else if (!record.reachedOutcome) {
       reasons.push(
         `session ${record.session} never ended after ${record.actions} actions ` +
@@ -253,6 +279,22 @@ export function judgePlaythrough(
   };
 }
 
+/** The catalog and every session played: what a level count and "each level can be finished" rest on. */
+export function renderSessions(r: PlaythroughRecord): string {
+  const catalog =
+    typeof r.sessionCount === 'number' && r.sessionCount >= 0
+      ? `catalog ${r.sessionCount} session(s)`
+      : `no session catalog registered (${PLAYTHROUGH_CATALOG_TYPE}) — the level count cannot be measured`;
+  const played = r.sessions && r.sessions.length > 0 ? r.sessions : null;
+  if (!played) return `Sessions: ${catalog}.`;
+  const parts = played.map((s) =>
+    !s.startAccepted
+      ? `#${s.index} refused`
+      : `#${s.index} ${s.reachedOutcome ? s.outcome : 'never ended'} in ${s.actions} actions (${s.seconds.toFixed(1)} s)`,
+  );
+  return `Sessions: ${catalog}; played ${played.length}: ${parts.join(', ')}.`;
+}
+
 /** One line, naming the medium: numbers from the batch editor are not the player's. */
 export function renderPerf(p: PlaythroughPerf): string {
   const parts: string[] = [];
@@ -279,6 +321,7 @@ export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): 
         `Phases: ${r.phasesSeen.join(' → ') || 'none'}; actions: ${r.actions}; outcome ${r.outcome ?? 'None'} after ${r.elapsedSeconds.toFixed(1)} s.`,
       );
     }
+    if (!r.missing) lines.push(renderSessions(r));
     if (r.errors.length > 0) lines.push(`Errors during play (${r.errors.length}):\n  ${r.errors.slice(0, 5).join('\n  ')}`);
   }
   const f = verdict.frames;
@@ -334,7 +377,14 @@ export class PlaythroughTool implements ITool {
         type: 'number',
         description: "Which session to start — the game's own index (level, round, seed); default 1.",
       },
-      maxActions: { type: 'number', description: 'Upper bound on driver actions (default 60).' },
+      sessions: {
+        type: 'string',
+        description:
+          'Which sessions to play in one run, each to an outcome: "1-3", "2,5", or "all" (every session the ' +
+          `game's ${PLAYTHROUGH_CATALOG_TYPE} reports, at most ${MAX_SESSIONS_PER_RUN}). Default: only \`session\`. ` +
+          'maxActions and deadlineSeconds apply per session.',
+      },
+      maxActions: { type: 'number', description: 'Upper bound on driver actions per session (default 60).' },
       deadlineSeconds: {
         type: 'number',
         description: 'How long the session may run before the play-through is judged unfinished (default 45).',
@@ -407,6 +457,7 @@ export class PlaythroughTool implements ITool {
         STRADA_PLAYTHROUGH_JSON: join(captureDir, PLAYTHROUGH_RECORD_FILE),
       };
       if (typeof input['session'] === 'number') env['STRADA_PLAYTHROUGH_SESSION'] = String(Math.floor(input['session']));
+      if (typeof input['sessions'] === 'string' && input['sessions'].trim()) env['STRADA_PLAYTHROUGH_SESSIONS'] = input['sessions'].trim();
       if (typeof input['maxActions'] === 'number') env['STRADA_PLAYTHROUGH_MAX_ACTIONS'] = String(Math.floor(input['maxActions']));
       if (typeof input['deadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_DEADLINE_S'] = String(Math.floor(input['deadlineSeconds']));
       if (typeof input['bootDeadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_BOOT_DEADLINE_S'] = String(Math.floor(input['bootDeadlineSeconds']));

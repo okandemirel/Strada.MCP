@@ -22,6 +22,10 @@ export const PLAYTHROUGH_RECORD_FILE = 'playthrough.json';
 export const PLAYTHROUGH_ASSEMBLY = 'Strada.Generated.PlaythroughTests';
 /** The contract the test drives; a game registers one in its service container. */
 export const PLAYTHROUGH_DRIVER_TYPE = 'Strada.Core.Play.IPlaythroughDriver';
+/** Optional: how many sessions the game offers; lets the run play them all and measure a level count. */
+export const PLAYTHROUGH_CATALOG_TYPE = 'Strada.Core.Play.ISessionCatalog';
+/** Upper bound on sessions one run plays ("all" on a 200-level game is not one run). */
+export const MAX_SESSIONS_PER_RUN = 12;
 
 /** The C# source of the test and its assembly definition. */
 export function buildPlaythroughTest(sceneName: string): { source: string; asmdef: string } {
@@ -65,7 +69,60 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         public float playSeconds;
         public int playFrames;
         public float worstFrameMs;
+        /// <summary>ISessionCatalog.SessionCount; -1 when the game registers no catalog.</summary>
+        public int sessionCount = -1;
+        /// <summary>Every session this run played, in order; the top-level fields mirror the first.</summary>
+        public List<SessionRecord> sessions = new List<SessionRecord>();
         public List<string> errors = new List<string>();
+    }
+
+    [Serializable]
+    public class SessionRecord
+    {
+        public int index;
+        public bool startAccepted;
+        public List<string> phasesSeen = new List<string>();
+        public int actions;
+        public string outcome;
+        public bool reachedOutcome;
+        public float seconds;
+        public string lastPhase = "";
+    }
+
+    /// <summary>"1-3", "2,5", "all" (bounded by the catalog and MAX_SESSIONS_PER_RUN) or a single index; nothing → the default index.</summary>
+    static List<int> SessionIndices(string spec, int defaultIndex, int catalogCount)
+    {
+        var result = new List<int>();
+        if (string.IsNullOrEmpty(spec)) { result.Add(defaultIndex); return result; }
+        spec = spec.Trim().ToLowerInvariant();
+        if (spec == "all")
+        {
+            if (catalogCount <= 0) { result.Add(defaultIndex); return result; }
+            for (var i = 1; i <= Math.Min(catalogCount, ${MAX_SESSIONS_PER_RUN}); i++) result.Add(i);
+            return result;
+        }
+        foreach (var part in spec.Split(','))
+        {
+            var range = part.Trim().Split('-');
+            int a, b;
+            if (range.Length == 2 && int.TryParse(range[0], out a) && int.TryParse(range[1], out b))
+            {
+                for (var i = a; i <= b && result.Count < ${MAX_SESSIONS_PER_RUN}; i++) result.Add(i);
+            }
+            else if (int.TryParse(part.Trim(), out a) && result.Count < ${MAX_SESSIONS_PER_RUN}) result.Add(a);
+        }
+        if (result.Count == 0) result.Add(defaultIndex);
+        return result;
+    }
+
+    static void Mirror(Record record, SessionRecord s)
+    {
+        record.session = s.index;
+        record.startAccepted = s.startAccepted;
+        record.actions = s.actions;
+        record.outcome = s.outcome;
+        record.reachedOutcome = s.reachedOutcome;
+        record.phasesSeen = s.phasesSeen;
     }
 
     const int Width = 1280;
@@ -158,6 +215,13 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             while (Time.realtimeSinceStartup < idleDeadline) yield return null;
             record.phaseAfterBoot = Phase(driver);
             try { record.autoStarted = driver.IsSessionActive; } catch { record.autoStarted = false; }
+            ISessionCatalog catalog = null;
+            try { GameBootstrapper.Services.TryGet(out catalog); } catch { catalog = null; }
+            if (catalog != null)
+            {
+                try { record.sessionCount = catalog.SessionCount; }
+                catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[SessionCount] " + e.GetType().Name + ": " + e.Message); }
+            }
 
             if (captureDir != null)
             {
@@ -178,62 +242,83 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             }
             Capture(record, captureDir, camera, target, readback);
 
-            if (record.autoStarted)
-                record.startAccepted = true;
-            else
-            {
-                try { record.startAccepted = driver.StartSession(record.session); }
-                catch (Exception e)
-                {
-                    record.startAccepted = false;
-                    if (record.errors.Count < 20) record.errors.Add("[StartSession] " + e.GetType().Name + ": " + e.Message);
-                }
-            }
-            yield return null;
-
-            var playDeadline = Time.realtimeSinceStartup + deadlineSeconds;
-            var playStarted = Time.realtimeSinceStartup;
+            // One pass per requested session. The first may already be running
+            // (the game starts play by itself); every later one is started by the
+            // driver after a few settling frames. A session that never ends stops
+            // the run — the sessions after it were not proven either way.
+            var indices = SessionIndices(Env("STRADA_PLAYTHROUGH_SESSIONS", null), record.session, record.sessionCount);
             var frame = 0;
-            var last = "";
-            var skipDelta = true; // the first delta belongs to StartSession's frame
-            while (Time.realtimeSinceStartup < playDeadline)
+            var wallPlaySeconds = 0f;
+            for (var si = 0; si < indices.Count; si++)
             {
-                if (!skipDelta)
+                var s = new SessionRecord { index = indices[si] };
+                record.sessions.Add(s);
+                if (si == 0 && record.autoStarted)
+                    s.startAccepted = true;
+                else
                 {
-                    var ms = Time.unscaledDeltaTime * 1000f;
-                    record.playFrames++;
-                    record.playSeconds += Time.unscaledDeltaTime;
-                    if (ms > record.worstFrameMs) record.worstFrameMs = ms;
+                    if (si > 0) for (var settle = 0; settle < 5; settle++) yield return null;
+                    try { s.startAccepted = driver.StartSession(s.index); }
+                    catch (Exception e)
+                    {
+                        s.startAccepted = false;
+                        if (record.errors.Count < 20) record.errors.Add("[StartSession " + s.index + "] " + e.GetType().Name + ": " + e.Message);
+                    }
                 }
-                skipDelta = false;
-                var phase = Phase(driver);
-                if (phase != last) { record.phasesSeen.Add(phase); last = phase; }
-                PlaythroughOutcome outcome;
-                try { outcome = driver.Outcome; } catch { outcome = PlaythroughOutcome.None; }
-                if (outcome != PlaythroughOutcome.None)
-                {
-                    record.outcome = outcome.ToString();
-                    record.reachedOutcome = true;
-                    break;
-                }
-                if (record.actions < maxActions)
-                {
-                    try { if (driver.Act()) record.actions++; }
-                    catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[Act] " + e.GetType().Name + ": " + e.Message); }
-                }
+                if (si == 0) Mirror(record, s);
                 yield return null;
-                frame++;
-                if (frame % FramesBetweenCaptures == 0) { Capture(record, captureDir, camera, target, readback); skipDelta = true; }
+                if (!s.startAccepted) { s.outcome = "None"; if (si == 0) Mirror(record, s); break; }
+
+                var playDeadline = Time.realtimeSinceStartup + deadlineSeconds;
+                var playStarted = Time.realtimeSinceStartup;
+                var last = "";
+                var skipDelta = true; // the first delta belongs to StartSession's frame
+                while (Time.realtimeSinceStartup < playDeadline)
+                {
+                    if (!skipDelta)
+                    {
+                        var ms = Time.unscaledDeltaTime * 1000f;
+                        record.playFrames++;
+                        record.playSeconds += Time.unscaledDeltaTime;
+                        if (ms > record.worstFrameMs) record.worstFrameMs = ms;
+                    }
+                    skipDelta = false;
+                    var phase = Phase(driver);
+                    if (phase != last) { s.phasesSeen.Add(phase); last = phase; }
+                    PlaythroughOutcome outcome;
+                    try { outcome = driver.Outcome; } catch { outcome = PlaythroughOutcome.None; }
+                    if (outcome != PlaythroughOutcome.None)
+                    {
+                        s.outcome = outcome.ToString();
+                        s.reachedOutcome = true;
+                        break;
+                    }
+                    if (s.actions < maxActions)
+                    {
+                        try { if (driver.Act()) s.actions++; }
+                        catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[Act] " + e.GetType().Name + ": " + e.Message); }
+                    }
+                    yield return null;
+                    frame++;
+                    if (frame % FramesBetweenCaptures == 0) { Capture(record, captureDir, camera, target, readback); skipDelta = true; }
+                }
+                s.seconds = Time.realtimeSinceStartup - playStarted;
+                wallPlaySeconds += s.seconds;
+                s.lastPhase = last;
+                if (!s.reachedOutcome) s.outcome = "None";
+                if (si == 0) Mirror(record, s);
+                if (!s.reachedOutcome) break;
             }
-            if (record.playFrames == 0) record.playSeconds = Time.realtimeSinceStartup - playStarted;
-            if (!record.reachedOutcome) record.outcome = "None";
+            if (record.playFrames == 0) record.playSeconds = wallPlaySeconds;
             Capture(record, captureDir, camera, target, readback);
 
-            Assert.IsTrue(record.startAccepted, "The driver refused to start session " + record.session + ".");
-            Assert.IsTrue(
-                record.reachedOutcome,
-                "Session " + record.session + " never ended after " + record.actions + " actions in " + deadlineSeconds
-                + " s; last phase " + last + ".");
+            foreach (var s in record.sessions)
+                Assert.IsTrue(s.startAccepted, "The driver refused to start session " + s.index + ".");
+            foreach (var s in record.sessions)
+                Assert.IsTrue(
+                    s.reachedOutcome,
+                    "Session " + s.index + " never ended after " + s.actions + " actions in " + deadlineSeconds
+                    + " s; last phase " + s.lastPhase + ".");
         }
         finally
         {
