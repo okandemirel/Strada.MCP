@@ -57,9 +57,17 @@ export class SceneBuildTool implements ITool {
           '"references":["boardCfg","scoreCfg"]}\n\n' +
           'The scene specification. Shape: { specVersion, scene: {path, mode, addToBuildSettings}, ' +
           'assets: [{id, type, path, fields}], objects: [{id, name, parent, prefabPath, keepInScene, ' +
-          'components: [{type, fields}]}] }. ' +
+          'transform: {position: [x,y,z], rotation: [x,y,z] (euler degrees), scale: [x,y,z]}, ' +
+          'components: [{type, fields}]}] }. transform is LOCAL to the parent and every part is ' +
+          'optional; without one the object sits at the origin. ' +
           'A field is {name, kind, ...} where kind is "reference" | "prefab" | "string" | "int" | ' +
-          '"bool" | "float"; a reference or prefab carries {reference: "<id in this spec>"}. ' +
+          '"bool" | "float" | "vector2" | "vector3" | "color" | "enum" | "intList" | "floatList" | ' +
+          '"stringList"; a reference or prefab carries {reference: "<id in this spec>"}; vector2/vector3 ' +
+          'carry floatValues: [..]; color carries floatValues [r,g,b(,a)] in 0-1 or a hex stringValue; ' +
+          'enum carries stringValue (the member name); the list kinds carry intValues / floatValues / ' +
+          'stringValues and fill a T[] or List<T>. A name that is a public PROPERTY rather than a ' +
+          'serialized field (Camera.orthographic, Light.intensity, Canvas.renderMode) is set through ' +
+          'the property, so Unity\'s own components are configurable. ' +
           'Give an object a prefabPath to save it as a prefab asset once its fields are applied, and ' +
           'keepInScene: false when it is only a template the game spawns at runtime — otherwise the ' +
           'first frame has two of it. kind "prefab" resolves to the saved prefab ASSET while kind ' +
