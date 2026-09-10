@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { perfFromRecord, renderSessions, judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
+import { perfFromRecord, renderSessions, renderRuntime, judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
 import { buildPlaythroughTest, emitPlaythroughTest, PLAYTHROUGH_ASSEMBLY, PLAYTHROUGH_DRIVER_TYPE } from './playthrough-test.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 
@@ -102,6 +102,16 @@ describe('the play-through verdict is derived from the record, the pixels and th
       'Sessions: no session catalog registered (Strada.Core.Play.ISessionCatalog) — the level count cannot be measured.',
     );
     expect(renderSessions({ ...goodRecord, sessionCount: 3, sessions: [sessions[0]!] })).toBe('Sessions: catalog 3 session(s); played 1: #1 Won in 14 actions (12.1 s).');
+  });
+
+  it('the runtime dump names what was on screen at the end of play (2026-09-10)', () => {
+    const runtime = { renderers: 14, worldRenderers: 12, spriteRenderers: 10, meshRenderers: 2, canvases: 1, particleSystems: 1, audioSources: 2, audioPlaying: 1, sprites: ['pig_idle', 'board_bg'], meshes: ['Cube', 'StageMesh'], primitiveMeshes: 1 };
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, runtime }));
+    frames(drawn(0), drawn(40), drawn(90));
+    const v = judgePlaythrough(dir);
+    expect(v.record?.runtime).toEqual(runtime);
+    expect(renderVerdict(v, dir)).toContain('Runtime at end of play: 12 world renderer(s) (10 sprite, 2 mesh (1 engine primitive)); sprites: pig_idle, board_bg; meshes: Cube, StageMesh; 1 canvas(es), 1 particle system(s), 2 audio source(s), 1 playing.');
+    expect(renderRuntime({ ...runtime, sprites: [], meshes: [], primitiveMeshes: 0 })).toBe('Runtime at end of play: 12 world renderer(s) (10 sprite, 2 mesh); 1 canvas(es), 1 particle system(s), 2 audio source(s), 1 playing.');
   });
 
   it('a session that never ended is not ok, and the reason names the actions and the phases', () => {
@@ -214,6 +224,8 @@ describe('the emitted play-through test', () => {
       'ISessionCatalog catalog',
       'GameBootstrapper.Services.TryGet(out catalog)',
       'record.sessionCount = catalog.SessionCount',
+      'record.runtime = DumpRuntime()',
+      'FindObjectsByType<Renderer>',
       'driver.Act()',
       'driver.Outcome',
       'driver.IsSessionActive',

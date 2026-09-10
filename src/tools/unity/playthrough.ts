@@ -67,7 +67,23 @@ export interface PlaythroughRecord {
   sessionCount?: number;
   /** Every session the run played, in order (absent on records from older tests). */
   sessions?: SessionRecord[];
+  /** What was on screen at the end of play — code-instantiated objects included (absent on older records). */
+  runtime?: RuntimeDump;
   errors: string[];
+}
+
+export interface RuntimeDump {
+  renderers: number;
+  worldRenderers: number;
+  spriteRenderers: number;
+  meshRenderers: number;
+  canvases: number;
+  particleSystems: number;
+  audioSources: number;
+  audioPlaying: number;
+  sprites: string[];
+  meshes: string[];
+  primitiveMeshes: number;
 }
 
 export interface SessionRecord {
@@ -299,6 +315,17 @@ export function renderSessions(r: PlaythroughRecord): string {
   return `Sessions: ${catalog}; played ${played.length}: ${parts.join(', ')}.`;
 }
 
+/** What the scene held at the end of play: the file scan's blind spot (runtime instantiation) made visible. */
+export function renderRuntime(d: RuntimeDump): string {
+  const sprites = d.sprites.length > 0 ? `; sprites: ${d.sprites.slice(0, 8).join(', ')}${d.sprites.length > 8 ? ', …' : ''}` : '';
+  const meshes = d.meshes.length > 0 ? `; meshes: ${d.meshes.slice(0, 6).join(', ')}${d.meshes.length > 6 ? ', …' : ''}` : '';
+  const prim = d.primitiveMeshes > 0 ? ` (${d.primitiveMeshes} engine primitive${d.primitiveMeshes === 1 ? '' : 's'})` : '';
+  return (
+    `Runtime at end of play: ${d.worldRenderers} world renderer(s) (${d.spriteRenderers} sprite, ${d.meshRenderers} mesh${prim})` +
+    `${sprites}${meshes}; ${d.canvases} canvas(es), ${d.particleSystems} particle system(s), ${d.audioSources} audio source(s), ${d.audioPlaying} playing.`
+  );
+}
+
 /** One line, naming the medium: numbers from the batch editor are not the player's. */
 export function renderPerf(p: PlaythroughPerf): string {
   const parts: string[] = [];
@@ -327,6 +354,7 @@ export function renderVerdict(verdict: PlaythroughVerdict, captureDir: string): 
       );
     }
     if (!r.missing) lines.push(renderSessions(r));
+    if (!r.missing && r.runtime) lines.push(renderRuntime(r.runtime));
     if (r.errors.length > 0) lines.push(`Errors during play (${r.errors.length}):\n  ${r.errors.slice(0, 5).join('\n  ')}`);
   }
   const f = verdict.frames;
