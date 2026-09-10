@@ -6,6 +6,7 @@ import type { ITool, ToolContext, ToolMetadata, ToolResult } from '../tool.inter
 import { zodToJsonSchema } from '../../utils/zod-to-json-schema.js';
 import { BridgeTool } from './bridge-tool.js';
 import { getStaticCompileStatus } from './local-diagnostics.js';
+import { PlaymodeVerifyTool } from './playmode-verify.js';
 
 /** Canonical form for project-path identity (macOS /var vs /private/var). */
 function canonicalProjectPath(p: string): string {
@@ -565,21 +566,48 @@ export class VerifyChangeTool extends CompositeBridgeTool {
       // dropped, and the answer came back "passed". Measured 2026-08-21, 15:47:
       // an agent passed runTests:true, testMode:"play", read "passed", and then
       // spent twelve minutes trying to launch Unity by hand.
-      const testsRequestedButImpossible = input['runTests'] === true && !failed;
+      // runTests OFFLINE (2026-09-10): the one "verify my work" tool used to
+      // drop the request with a note and answer from the compile alone. The
+      // headless PlayMode runner exists; the suite is run through it here,
+      // and its verdict decides the status beside the compile.
+      const testsRequested = input['runTests'] === true && !failed;
+      let headlessTests: { ran: boolean; passed?: boolean; platform: string; verdict?: string; note?: string } | undefined;
+      if (testsRequested) {
+        try {
+          const suite = await new PlaymodeVerifyTool().execute(
+            {
+              projectPath: context.projectPath,
+              ...(typeof input['testFilter'] === 'string' ? { testFilter: input['testFilter'] } : {}),
+            },
+            context,
+          );
+          headlessTests = { ran: true, passed: !suite.isError, platform: 'PlayMode', verdict: suite.content.slice(0, 2000) };
+        } catch (err) {
+          headlessTests = { ran: false, platform: 'PlayMode', note: `the headless test run could not start: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      }
+      const testsNotRun = testsRequested && headlessTests?.ran !== true;
       return {
         content: JSON.stringify({
           status: failed
             ? 'failed'
-            : testsRequestedButImpossible
+            : testsNotRun
               ? 'tests-not-run'
-              : offline.verified ? 'passed' : 'unknown',
+              : headlessTests?.ran && headlessTests.passed === false
+                ? 'failed'
+                : offline.verified ? 'passed' : 'unknown',
           mode: 'offline',
-          ...(testsRequestedButImpossible
+          ...(headlessTests
             ? {
-                runTestsIgnored:
-                  'You asked this check to run tests. It cannot: there is no editor bridge, and a ' +
-                  'headless compile does not build test assemblies. The compile result below is ' +
-                  'real and says nothing about your tests. Run unity_playmode_verify.',
+                tests: headlessTests.ran
+                  ? {
+                      ran: true,
+                      platform: headlessTests.platform,
+                      passed: headlessTests.passed,
+                      how: 'the PlayMode suite was run headlessly (batch mode, -runTests) because no editor bridge is connected — the same run unity_playmode_verify makes',
+                      verdict: headlessTests.verdict,
+                    }
+                  : { ran: false, platform: headlessTests.platform, note: headlessTests.note },
               }
             : {}),
           reason: failed
@@ -609,7 +637,7 @@ export class VerifyChangeTool extends CompositeBridgeTool {
           summary: { compileErrors: Number.isFinite(errorCount) ? errorCount : null, compileIssues: issues },
           compile: offline,
         }, null, 2),
-        isError: failed || testsRequestedButImpossible,
+        isError: failed || testsNotRun || (headlessTests?.ran === true && headlessTests.passed === false),
       };
     }
 
