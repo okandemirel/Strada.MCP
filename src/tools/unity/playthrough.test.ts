@@ -2,18 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  judgePlaythrough,
-  entrySceneFromBuildSettings,
-  renderVerdict,
-  MIN_MOTION_SHARE,
-} from './playthrough.js';
-import {
-  buildPlaythroughTest,
-  emitPlaythroughTest,
-  DEFAULT_BINDING,
-  PLAYTHROUGH_ASSEMBLY,
-} from './playthrough-test.js';
+import { judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE } from './playthrough.js';
+import { buildPlaythroughTest, emitPlaythroughTest, PLAYTHROUGH_ASSEMBLY, PLAYTHROUGH_DRIVER_TYPE } from './playthrough-test.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 
 let dir: string;
@@ -25,36 +15,31 @@ afterEach(() => {
 });
 
 const goodRecord = {
-  scene: 'Main',
-  level: 1,
-  stateAfterBoot: 'None',
+  scene: 'Entry',
+  session: 1,
+  driverType: PLAYTHROUGH_DRIVER_TYPE,
+  phaseAfterBoot: 'Home',
   autoStarted: false,
   startAccepted: true,
-  statesSeen: ['Playing', 'LevelWon'],
-  tapsDriven: 12,
-  terminalState: 'LevelWon',
-  reachedTerminal: true,
+  phasesSeen: ['Playing', 'Won'],
+  actions: 12,
+  outcome: 'Won',
+  reachedOutcome: true,
   framesCaptured: 3,
   elapsedSeconds: 4.2,
   errors: [],
 };
 
 function frames(...pixels: Array<(x: number, y: number) => [number, number, number]>): void {
-  pixels.forEach((p, i) =>
-    writeFileSync(join(dir, `frame_${String(i).padStart(5, '0')}.png`), encodeRgbPng(160, 90, p)),
-  );
+  pixels.forEach((p, i) => writeFileSync(join(dir, `frame_${String(i).padStart(5, '0')}.png`), encodeRgbPng(160, 90, p)));
 }
 const drawn =
   (seed: number) =>
-  (x: number, y: number): [number, number, number] => [
-    ((x + seed) * 7) & 255,
-    (y * 11) & 255,
-    ((x ^ y) * 3) & 255,
-  ];
+  (x: number, y: number): [number, number, number] => [((x + seed) * 7) & 255, (y * 11) & 255, ((x ^ y) * 3) & 255];
 const flat = (): [number, number, number] => [20, 20, 20];
 
 describe('the play-through verdict is derived from the record, the pixels and the runner', () => {
-  it('ok when the level ended, frames are drawn and something moved', () => {
+  it('ok when the session ended, frames are drawn and something moved', () => {
     writeFileSync(join(dir, 'playthrough.json'), JSON.stringify(goodRecord));
     frames(drawn(0), drawn(40), drawn(90));
     const v = judgePlaythrough(dir, { total: 1, passed: 1, failed: 0, result: 'Passed' });
@@ -63,24 +48,34 @@ describe('the play-through verdict is derived from the record, the pixels and th
     expect(v.frames).toMatchObject({ count: 3, unreadable: 0, flat: 0 });
     expect(v.frames.maxMotionShare).toBeGreaterThan(MIN_MOTION_SHARE);
     expect(renderVerdict(v, dir)).toContain('PLAY-THROUGH OK');
-    expect(renderVerdict(v, dir)).toContain('auto-started: no');
+    expect(renderVerdict(v, dir)).toContain('starts play by itself: no');
   });
 
-  it('a level that never ended is not ok, and the reason names the last state and the taps', () => {
+  it('a session that never ended is not ok, and the reason names the actions and the phases', () => {
     writeFileSync(
       join(dir, 'playthrough.json'),
-      JSON.stringify({
-        ...goodRecord,
-        reachedTerminal: false,
-        terminalState: 'Playing',
-        statesSeen: ['Playing'],
-        tapsDriven: 60,
-      }),
+      JSON.stringify({ ...goodRecord, reachedOutcome: false, outcome: 'None', phasesSeen: ['Playing'], actions: 60 }),
     );
     frames(drawn(0), drawn(40));
     const v = judgePlaythrough(dir);
     expect(v.ok).toBe(false);
-    expect(v.reasons.join('\n')).toMatch(/never ended: last state Playing after 60 taps/);
+    expect(v.reasons.join('\n')).toMatch(/session 1 never ended after 60 actions \(phases seen: Playing\)/);
+  });
+
+  it('a game that registers no driver is named as unplayable by the framework', () => {
+    writeFileSync(
+      join(dir, 'playthrough.json'),
+      JSON.stringify({
+        ...goodRecord,
+        missing: `the game registers no ${PLAYTHROUGH_DRIVER_TYPE} — it cannot be played by the framework`,
+        startAccepted: false,
+        reachedOutcome: false,
+      }),
+    );
+    frames(drawn(0), drawn(40));
+    const v = judgePlaythrough(dir);
+    expect(v.reasons).toEqual([expect.stringMatching(/registers no Strada\.Core\.Play\.IPlaythroughDriver/)]);
+    expect(renderVerdict(v, dir)).toContain('Could not play: the game registers no');
   });
 
   it('flat frames are not ok even when the game reports a win', () => {
@@ -111,15 +106,11 @@ describe('the play-through verdict is derived from the record, the pixels and th
   it('errors logged during play and a refused start are reasons', () => {
     writeFileSync(
       join(dir, 'playthrough.json'),
-      JSON.stringify({
-        ...goodRecord,
-        startAccepted: false,
-        errors: ['[Exception] NullReferenceException: x'],
-      }),
+      JSON.stringify({ ...goodRecord, startAccepted: false, errors: ['[Exception] NullReferenceException: x'] }),
     );
     frames(drawn(0), drawn(40));
     const v = judgePlaythrough(dir);
-    expect(v.reasons.join('\n')).toMatch(/refused to start level 1/);
+    expect(v.reasons.join('\n')).toMatch(/the driver refused to start session 1/);
     expect(v.reasons.join('\n')).toMatch(/1 error\(s\) logged during play, first: \[Exception\]/);
   });
 
@@ -137,9 +128,9 @@ describe('the entry scene comes from Build Settings', () => {
     mkdirSync(join(dir, 'ProjectSettings'));
     writeFileSync(
       join(dir, 'ProjectSettings', 'EditorBuildSettings.asset'),
-      'EditorBuildSettings:\n  m_Scenes:\n  - enabled: 0\n    path: Assets/Scenes/Old.unity\n    guid: a\n  - enabled: 1\n    path: Assets/Scenes/Main.unity\n    guid: b\n',
+      'EditorBuildSettings:\n  m_Scenes:\n  - enabled: 0\n    path: Assets/Scenes/Old.unity\n    guid: a\n  - enabled: 1\n    path: Assets/Scenes/Entry.unity\n    guid: b\n',
     );
-    expect(entrySceneFromBuildSettings(dir)).toBe('Main');
+    expect(entrySceneFromBuildSettings(dir)).toBe('Entry');
   });
   it('null when nothing is enabled or the file is missing', () => {
     expect(entrySceneFromBuildSettings(dir)).toBeNull();
@@ -153,34 +144,31 @@ describe('the entry scene comes from Build Settings', () => {
 });
 
 describe('the emitted play-through test', () => {
-  it('binds by reflection to the named services, reads its knobs from the environment, and writes the record', () => {
-    const { source, asmdef } = buildPlaythroughTest('Main');
+  it('binds to the Strada.Core driver contract only, reads its knobs from the environment, and writes the record', () => {
+    const { source, asmdef } = buildPlaythroughTest('Entry');
     for (const needle of [
       'STRADA_PLAYTHROUGH_SCENE',
-      'STRADA_PLAYTHROUGH_LEVEL',
-      'STRADA_PLAYTHROUGH_MAX_TAPS',
+      'STRADA_PLAYTHROUGH_SESSION',
+      'STRADA_PLAYTHROUGH_MAX_ACTIONS',
       'STRADA_PLAYTHROUGH_DEADLINE_S',
       'STRADA_CAPTURE_DIR',
       'STRADA_PLAYTHROUGH_JSON',
-      DEFAULT_BINDING.flowType,
-      DEFAULT_BINDING.inputType,
-      '"StartLevel"',
-      '"State"',
-      '"CanTapConveyor"',
-      '"TapConveyor"',
-      '"LevelWon", "LevelFailed"',
-      'MakeGenericMethod',
+      'using Strada.Core.Play;',
+      'IPlaythroughDriver driver',
+      'GameBootstrapper.Services.TryGet(out driver)',
+      'driver.StartSession(record.session)',
+      'driver.Act()',
+      'driver.Outcome',
+      'driver.IsSessionActive',
+      'registers no " + record.driverType',
       'JsonUtility.ToJson(record, true)',
       'Application.CanStreamedLevelBeLoaded',
-      'autoStarted',
+      '"Entry"',
     ])
       expect(source, needle).toContain(needle);
-    expect(source).not.toMatch(/using YourGame/); // no assembly reference to the game: reflection only
-    const parsed = JSON.parse(asmdef) as {
-      name: string;
-      references: string[];
-      overrideReferences: boolean;
-    };
+    // No game's own names: the same test serves every Strada.Core game.
+    expect(source).not.toMatch(/PixelFlow|YourGame|StartLevel|TapConveyor|LevelWon|Type\.GetType|GetMethod\(|MakeGenericMethod/);
+    const parsed = JSON.parse(asmdef) as { name: string; references: string[]; overrideReferences: boolean };
     expect(parsed.name).toBe(PLAYTHROUGH_ASSEMBLY);
     expect(parsed.references).toContain('Strada.Core');
     expect(parsed.overrideReferences).toBe(false);
@@ -189,17 +177,12 @@ describe('the emitted play-through test', () => {
   it('is written into its own folder under the test dir, and refused without the test framework', () => {
     mkdirSync(join(dir, 'Packages'));
     writeFileSync(join(dir, 'Packages', 'manifest.json'), '{"dependencies":{}}');
-    expect(emitPlaythroughTest(dir, 'Main').written).toBe(false);
-    writeFileSync(
-      join(dir, 'Packages', 'manifest.json'),
-      '{"dependencies":{"com.unity.test-framework":"1.4.5"}}',
-    );
-    const e = emitPlaythroughTest(dir, 'Main', { ...DEFAULT_BINDING, terminalStates: ['Won'] });
+    expect(emitPlaythroughTest(dir, 'Entry').written).toBe(false);
+    writeFileSync(join(dir, 'Packages', 'manifest.json'), '{"dependencies":{"com.unity.test-framework":"1.4.5"}}');
+    const e = emitPlaythroughTest(dir, 'Entry');
     expect(e.written).toBe(true);
     expect(e.paths[0]).toBe('Assets/Tests/PlayMode/Playthrough/StradaPlaythroughTest.cs');
-    expect(
-      existsSync(join(dir, 'Assets/Tests/PlayMode/Playthrough', `${PLAYTHROUGH_ASSEMBLY}.asmdef`)),
-    ).toBe(true);
-    expect(readFileSync(join(dir, e.paths[0]!), 'utf8')).toContain('{ "Won" }');
+    expect(existsSync(join(dir, 'Assets/Tests/PlayMode/Playthrough', `${PLAYTHROUGH_ASSEMBLY}.asmdef`))).toBe(true);
+    expect(readFileSync(join(dir, e.paths[0]!), 'utf8')).toContain('"Entry"');
   });
 });
