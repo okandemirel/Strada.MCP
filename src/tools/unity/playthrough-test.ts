@@ -119,12 +119,16 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             }
             yield return SceneManager.LoadSceneAsync(record.scene, LoadSceneMode.Single);
 
-            var bootDeadline = Time.realtimeSinceStartup + 10f;
+            // A headless first boot loads the scene, imports what the editor
+            // never touched and compiles shaders before the bootstrapper runs;
+            // 30 s by default, overridable per run.
+            var bootSeconds = EnvInt("STRADA_PLAYTHROUGH_BOOT_DEADLINE_S", 30);
+            var bootDeadline = Time.realtimeSinceStartup + bootSeconds;
             while (Time.realtimeSinceStartup < bootDeadline && GameBootstrapper.Services == null)
                 yield return null;
             if (GameBootstrapper.Services == null)
             {
-                record.missing = "GameBootstrapper.Services stayed null for 10 s";
+                record.missing = "GameBootstrapper.Services stayed null for " + bootSeconds + " s — the entry scene holds no GameBootstrapper, or its config is unassigned, or a module threw while starting";
                 Assert.Fail(record.missing);
             }
 

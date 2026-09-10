@@ -259,6 +259,10 @@ export class PlaythroughTool implements ITool {
         type: 'number',
         description: 'How long the session may run before the play-through is judged unfinished (default 45).',
       },
+      bootDeadlineSeconds: {
+        type: 'number',
+        description: 'How long the bootstrapper may take to publish its services after the scene loads (default 30).',
+      },
       captureDir: {
         type: 'string',
         description: `Where frames, the record and the verdict go (default <projectPath>/${DEFAULT_CAPTURE_SUBDIR}; wiped before the run).`,
@@ -325,6 +329,7 @@ export class PlaythroughTool implements ITool {
       if (typeof input['session'] === 'number') env['STRADA_PLAYTHROUGH_SESSION'] = String(Math.floor(input['session']));
       if (typeof input['maxActions'] === 'number') env['STRADA_PLAYTHROUGH_MAX_ACTIONS'] = String(Math.floor(input['maxActions']));
       if (typeof input['deadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_DEADLINE_S'] = String(Math.floor(input['deadlineSeconds']));
+      if (typeof input['bootDeadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_BOOT_DEADLINE_S'] = String(Math.floor(input['bootDeadlineSeconds']));
 
       const exitCode = await runUnityProcess(editor.binary, args, 580_000, env);
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
