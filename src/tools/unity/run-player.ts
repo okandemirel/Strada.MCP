@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, basename } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { resolveProjectPath } from './project-path.js';
@@ -22,7 +22,7 @@ import { PLAYTHROUGH_RECORD_FILE, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN
  * Runnable artifacts only: a macOS .app, a Windows .exe, a Linux executable.
  * An .apk or a WebGL folder cannot be run here and is said so.
  */
-import { resolveCaptureDir } from './capture-dir.js';
+import { prepareCaptureDir, resolveCaptureDir } from './capture-dir.js';
 
 export const PLAYER_CAPTURE_SUBDIR = join('Recordings', 'player-playthrough');
 
@@ -150,8 +150,9 @@ export class RunPlayerTool implements ITool {
     const decision = resolveCaptureDir(projectPath, input['captureDir'], PLAYER_CAPTURE_SUBDIR);
     if (decision.dir === undefined) return { content: `Error: ${decision.reason}`, isError: true };
     const captureDir = decision.dir;
-    rmSync(captureDir, { recursive: true, force: true });
-    mkdirSync(captureDir, { recursive: true });
+    // NEVER CLEARS WHAT IT DOES NOT OWN (Codex 2026-09-12 Z#7).
+    const ready = prepareCaptureDir(captureDir);
+    if (!ready.ok) return { content: `Error: ${ready.reason}`, isError: true };
     const jsonPath = join(captureDir, PLAYTHROUGH_RECORD_FILE);
     const logPath = join(captureDir, 'player.log');
     const deadline = typeof input['deadlineSeconds'] === 'number' ? Math.floor(input['deadlineSeconds']) : 45;

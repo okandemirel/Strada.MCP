@@ -12,7 +12,7 @@
  * removed.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /** The one directory tree a run may write its recordings into. */
@@ -90,4 +90,49 @@ export function resolveCaptureDir(
     };
   }
   return { dir: real };
+}
+
+/** The file that marks a directory as the recorder's own to clear. */
+export const RECORDING_MARKER = '.strada-recording';
+
+/**
+ * Make the run's directory ready — and NEVER clear a directory that is not
+ * the recorder's.
+ *
+ * Containment alone does not make a directory ours: an `Assets/SharedArt`
+ * symlink pointing INTO `Recordings/` resolved inside the permitted tree, and
+ * the next statement deleted the real art it pointed at (Codex 2026-09-12
+ * Z#7). A directory may be cleared only when it does not exist, is empty, or
+ * carries the marker a previous run left.
+ */
+export function prepareCaptureDir(dir: string): { ok: true } | { ok: false; reason: string } {
+  if (existsSync(dir)) {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch (error) {
+      return { ok: false, reason: `${dir} cannot be read (${String(error)}); nothing was written or removed` };
+    }
+    const ours = entries.includes(RECORDING_MARKER);
+    if (entries.length > 0 && !ours) {
+      return {
+        ok: false,
+        reason:
+          `${dir} holds files this recorder did not write (no ${RECORDING_MARKER}), so it was not cleared — ` +
+          'point captureDir at a fresh directory under Recordings/',
+      };
+    }
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      return { ok: false, reason: `${dir} could not be cleared (${String(error)})` };
+    }
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, RECORDING_MARKER), 'Written by Strada.MCP; this directory is cleared before each run.\n');
+  } catch (error) {
+    return { ok: false, reason: `${dir} could not be created (${String(error)})` };
+  }
+  return { ok: true };
 }

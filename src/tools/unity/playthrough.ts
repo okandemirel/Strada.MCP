@@ -17,7 +17,7 @@
  * verdict is also written as JSON beside the frames so a delivery gate can
  * read it without parsing prose. Nothing here knows a game's own names.
  */
-import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
@@ -33,7 +33,7 @@ import {
   emitPlaythroughTest, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
 export const PLAYTHROUGH_VERDICT_FILE = 'playthrough-verdict.json';
-import { resolveCaptureDir } from './capture-dir.js';
+import { prepareCaptureDir, resolveCaptureDir } from './capture-dir.js';
 
 export const DEFAULT_CAPTURE_SUBDIR = 'Recordings/playthrough';
 /** Below this share of moved samples between the most different pair of frames, nothing on screen responded to play. */
@@ -544,12 +544,9 @@ export class PlaythroughTool implements ITool {
     const decision = resolveCaptureDir(projectPath, input['captureDir'], DEFAULT_CAPTURE_SUBDIR);
     if (decision.dir === undefined) return { content: `Error: ${decision.reason}`, isError: true };
     const captureDir = decision.dir;
-    try {
-      rmSync(captureDir, { recursive: true, force: true });
-      mkdirSync(captureDir, { recursive: true });
-    } catch (error) {
-      return { content: `Error: cannot prepare ${captureDir}: ${String(error)}`, isError: true };
-    }
+    // NEVER CLEARS WHAT IT DOES NOT OWN (Codex 2026-09-12 Z#7).
+    const ready = prepareCaptureDir(captureDir);
+    if (!ready.ok) return { content: `Error: ${ready.reason}`, isError: true };
 
     const scratch = mkdtempSync(join(tmpdir(), 'strada-playthrough-'));
     const resultsPath = join(scratch, 'results.xml');

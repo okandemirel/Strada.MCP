@@ -3,10 +3,10 @@
  * (2026-09-12 U#F7, X): the runner cleared whatever the caller named.
  */
 import { describe, expect, it, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveCaptureDir } from './capture-dir.js';
+import { prepareCaptureDir, resolveCaptureDir, RECORDING_MARKER } from './capture-dir.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
@@ -90,5 +90,43 @@ describe('where a run may write its recordings', () => {
     const decision = resolveCaptureDir(root, 'Recordings/escape/frames', 'Recordings/player-playthrough');
     expect(decision.dir).toBeUndefined();
     expect(decision.reason).toContain('nothing was written or removed');
+  });
+});
+
+/**
+ * Containment alone does not make a directory OURS: an `Assets/SharedArt`
+ * symlink pointing INTO Recordings/ resolves inside the permitted tree, and
+ * the next statement deleted the real art it pointed at (Codex 2026-09-12
+ * Z#7).
+ */
+describe('the recorder clears only what it owns', () => {
+  it('refuses a directory that holds files it did not write', () => {
+    const root = project();
+    const art = join(root, 'Recordings', 'source-art');
+    mkdirSync(art, { recursive: true });
+    writeFileSync(join(art, 'Hero.png'), 'real art');
+
+    const decision = prepareCaptureDir(art);
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toContain('did not write');
+    // The art is still there.
+    expect(existsSync(join(art, 'Hero.png'))).toBe(true);
+  });
+
+  it('creates a fresh directory, marks it, and clears its OWN one next time', () => {
+    const root = project();
+    const run = join(root, 'Recordings', 'run-1');
+    expect(prepareCaptureDir(run).ok).toBe(true);
+    expect(existsSync(join(run, RECORDING_MARKER))).toBe(true);
+
+    // A previous run's frames are ours to clear.
+    writeFileSync(join(run, 'frame_00000.png'), 'old');
+    expect(prepareCaptureDir(run).ok).toBe(true);
+    expect(readdirSync(run)).toEqual([RECORDING_MARKER]);
+
+    // An empty directory nobody marked is fine too.
+    const empty = join(root, 'Recordings', 'run-2');
+    mkdirSync(empty, { recursive: true });
+    expect(prepareCaptureDir(empty).ok).toBe(true);
   });
 });
