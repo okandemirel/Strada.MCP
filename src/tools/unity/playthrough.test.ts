@@ -279,6 +279,42 @@ describe('the entry scene comes from Build Settings', () => {
   });
 });
 
+/**
+ * Codex round AG#5, reproduced: a run whose `SaveManager.Awake` threw a
+ * NullReferenceException — before the runner could subscribe to errors — came
+ * back `ok: true, reasons: []` with the exception sitting in the log as
+ * informational text.
+ */
+describe('an exception while the game was STARTING is part of the verdict (Codex 2026-09-13 AG#5)', () => {
+  it('refuses a run whose startup threw, and names it', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify(goodRecord));
+    frames(drawn(0), drawn(40));
+    const log = [
+      'Loading scene Entry',
+      'NullReferenceException: Object reference not set to an instance of an object',
+      '  at SaveManager.Awake () [0x00012] in /p/Assets/SaveManager.cs:41',
+    ].join('\n');
+    const v = judgePlaythrough(dir, { total: 1, passed: 1, failed: 0, result: 'Passed' }, log);
+    expect(v.ok).toBe(false);
+    expect(v.reasons.join('\n')).toMatch(/unhandled exception\(s\) while the game was starting/);
+  });
+
+  it('says nothing about a clean log, a handled exception, or one thrown during play', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify(goodRecord));
+    frames(drawn(0), drawn(40));
+    for (const log of [
+      'Loading scene Entry\nEverything is fine',
+      'Caught NullReferenceException, handled: the save file was missing\n  at SaveManager.Awake () [0x00012]',
+      // An exception during PLAY is the runner's own business: it records it
+      // with context, and this rule is about starting up.
+      'InvalidOperationException: the pig fell over\n  at Pig.Update () [0x0001]',
+    ]) {
+      const v = judgePlaythrough(dir, { total: 1, passed: 1, failed: 0, result: 'Passed' }, log);
+      expect(v.ok, log).toBe(true);
+    }
+  });
+});
+
 describe('the emitted play-through test', () => {
   it('binds to the Strada.Core driver contract only, reads its knobs from the environment, and writes the record', () => {
     const { source, asmdef } = buildPlaythroughTest('Entry');

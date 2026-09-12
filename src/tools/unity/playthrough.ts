@@ -207,6 +207,36 @@ export function unityLogFailureLines(log: string, max = 30): string[] {
   return out.slice(-max);
 }
 
+/**
+ * Lines of a Unity log that name an exception thrown from a STARTUP callback.
+ *
+ * Unity keeps running after one — the object is half-initialised and the game
+ * is not the game the project describes — and the log travelled as
+ * informational text while the verdict said ok (Codex 2026-09-13 AG#5). Only
+ * the startup callbacks: an exception during play is already recorded by the
+ * runner itself, with its own context.
+ */
+export function startupExceptionLines(log: string, max = 10): string[] {
+  const lines = log.split('\n');
+  const out: string[] = [];
+  const STARTUP_FRAME = /\b(?:Awake|OnEnable|Start|Initialize|InitializeOnLoad|RuntimeInitializeOnLoad|Bootstrap\w*)\s*\(/;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    // `NullReferenceException` has no word boundary before "Exception", so a
+    // leading \b made this match nothing at all.
+    if (!/Exception\b|\bError:/i.test(line)) continue;
+    // A line that merely mentions handling one is not one being thrown.
+    if (/\b(?:caught|handled|expected|suppress\w*)\b/i.test(line)) continue;
+    // THE STACK SAYS WHERE IT CAME FROM, and it is on the FOLLOWING lines:
+    // Unity writes the message first and the frames under it.
+    const head = [line, lines[i + 1] ?? '', lines[i + 2] ?? ''].join('\n');
+    if (!STARTUP_FRAME.test(head)) continue;
+    out.push(line.trim().slice(0, 300));
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 /** The first enabled scene in Build Settings, by name; null when none is enabled or the file is unreadable. */
 export function entrySceneFromBuildSettings(projectPath: string): string | null {
   try {
@@ -344,6 +374,19 @@ export function judgePlaythrough(
     if (unseen.length > 0) {
       reasons.push(
         `session(s) ${unseen.join(', ')} played with no frame captured of them — nothing here shows what they rendered`,
+      );
+    }
+  }
+  // AN EXCEPTION THROWN WHILE THE GAME WAS STARTING is part of the verdict.
+  // The log's failure lines travelled as informational text, so a run whose
+  // `SaveManager.Awake` threw a NullReferenceException — before the runner
+  // could even subscribe to errors — came back ok:true with reasons: []
+  // (Codex 2026-09-13 AG#5). A game that cannot start has not been played.
+  if (unityLog !== undefined) {
+    const fatal = startupExceptionLines(unityLog);
+    if (fatal.length > 0) {
+      reasons.push(
+        `${fatal.length} unhandled exception(s) while the game was starting, first: ${fatal[0]!.slice(0, 200)}`,
       );
     }
   }
