@@ -209,6 +209,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
     // levels rendered nothing anybody could see and the run still passed on
     // the earlier images (Codex 2026-09-13 AG#6).
     const int MaxFramesPerSession = 12;
+    // How long to wait for the session we asked for to become active: an
+    // asynchronous load takes more than one frame (Codex 2026-09-13 AG#4).
+    const float SessionReadySeconds = 5f;
     static int capturingSession;
     static int sessionFrames;
 
@@ -390,8 +393,19 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     var running = 0;
                     if (activeNow != null)
                     {
-                        try { running = activeNow.ActiveSession; }
-                        catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[ActiveSession] " + e.GetType().Name + ": " + e.Message); }
+                        // A LOAD MAY TAKE MORE THAN ONE FRAME (Codex
+                        // 2026-09-13 AG#4): the requested session is waited
+                        // for, briefly; anything else is believed at once.
+                        var readyDeadline = Time.realtimeSinceStartup + SessionReadySeconds;
+                        while (true)
+                        {
+                            try { running = activeNow.ActiveSession; }
+                            catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[ActiveSession] " + e.GetType().Name + ": " + e.Message); break; }
+                            if (running == s.requestedIndex) break;
+                            if (running != 0) break;
+                            if (Time.realtimeSinceStartup >= readyDeadline) break;
+                            yield return null;
+                        }
                     }
                     s.observedIndex = running;
                     // A PRESENT SERVICE REPORTING ZERO is no session running,

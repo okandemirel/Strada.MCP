@@ -305,6 +305,17 @@ describe('the emitted play-through test', () => {
       'registers no " + record.driverType',
       'JsonUtility.ToJson(record, true)',
       'Application.CanStreamedLevelBeLoaded',
+      // The runner's OWN observation of the loaded content, and a bounded
+      // wait for an asynchronous load (Codex 2026-09-13 AG#1, AG#4).
+      's.contentFingerprint = ContentFingerprint()',
+      'static string ContentFingerprint()',
+      'SceneManager.GetActiveScene()',
+      'Time.realtimeSinceStartup + SessionReadySeconds',
+      'if (running == s.requestedIndex) break;',
+      // A capture belongs to a session, and each session has its own budget
+      // (AG#6).
+      'MaxFramesPerSession',
+      'frame_s',
       '"Entry"',
     ])
       expect(source, needle).toContain(needle);
