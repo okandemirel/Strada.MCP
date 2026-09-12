@@ -98,3 +98,28 @@ describe('frame metrics measured from pixels', () => {
     expect(decodePngRgba(png)).toBeNull();
   });
 });
+
+/**
+ * Codex round AH#4, reproduced: a black-and-white game with a white shape
+ * moving across a black field has two colours, and "at most three quantized
+ * colours" was equated with "nothing rendered" — a refusal no correct
+ * monochrome game could avoid.
+ */
+describe('flat means UNIFORM, not monochrome (Codex 2026-09-13 AH#4)', () => {
+  const decode = (make: (x: number, y: number) => [number, number, number]) =>
+    decodePngRgba(new Uint8Array(encodeRgbPng(160, 90, make)))!;
+
+  it('a two-colour picture with a shape in it is not flat', () => {
+    const monochrome = decode((x, y) => (x > 40 && x < 90 && y > 20 && y < 70 ? [255, 255, 255] : [0, 0, 0]));
+    const metrics = frameMetrics(monochrome);
+    expect(metrics.colours).toBe(2);
+    expect(metrics.flat).toBe(false);
+  });
+
+  it('a picture that IS one colour is still flat, and so is one with a speck on it', () => {
+    expect(frameMetrics(decode(() => [17, 17, 17])).flat).toBe(true);
+    // One sample of 4096 differing is a dead frame with a stuck pixel, not a game.
+    const speck = decode((x, y) => (x === 0 && y === 0 ? [255, 255, 255] : [17, 17, 17]));
+    expect(frameMetrics(speck).flat).toBe(true);
+  });
+});

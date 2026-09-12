@@ -12,10 +12,17 @@
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const EVIDENCE_FENCE = 'strada-evidence';
+
+/**
+ * The digest SCHEME, mixed into every artifact digest — the same string
+ * Strada.Brain uses. A record written under the old path-and-size scheme must
+ * never look like one written under this one (Codex 2026-09-13 AH#8).
+ */
+export const ARTIFACT_DIGEST_VERSION = 'strada-artifact-v2-content';
 
 export interface ReceiptExecution {
   readonly completed: boolean;
@@ -62,6 +69,10 @@ export function artifactDigest(path: string | undefined): string | undefined {
   if (path === undefined || path === '') return undefined;
   try {
     const hash = createHash('sha256');
+    // THE BYTES, not the names and sizes: two different files of the same
+    // size hashed identically (Codex 2026-09-13 AH#8). The scheme is named in
+    // the digest so an old size-based record cannot pass as a content one.
+    hash.update(`${ARTIFACT_DIGEST_VERSION}\n`);
     const walk = (at: string, rel: string): void => {
       const st = statSync(at);
       if (st.isDirectory()) {
@@ -69,6 +80,7 @@ export function artifactDigest(path: string | undefined): string | undefined {
         return;
       }
       hash.update(`${rel}:${st.size}\n`);
+      hash.update(readFileSync(at));
     };
     walk(path, '');
     return hash.digest('hex');

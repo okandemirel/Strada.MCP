@@ -21,6 +21,16 @@ const QUANT_SHIFT = 4;
 const MOTION_THRESHOLD = 24;
 /** Fewer distinct quantized colours than this on the sample grid is a flat frame. */
 export const FLAT_FRAME_MAX_COLOURS = 3;
+/**
+ * A frame is FLAT when nearly every sample is the SAME colour.
+ *
+ * Counting colours instead measured a palette: a black-and-white game with a
+ * white shape moving across a black field has two colours and was reported as
+ * "every frame is flat (one colour): nothing visible was drawn" — a refusal no
+ * correct monochrome game could avoid (Codex 2026-09-13 AH#4). Flatness is
+ * about the PICTURE being uniform, not about how many colours it uses.
+ */
+export const FLAT_FRAME_MIN_DOMINANT_SHARE = 0.995;
 
 export interface DecodedPng {
   readonly width: number;
@@ -35,8 +45,10 @@ export interface FrameMetrics {
   readonly colours: number;
   /** Mean luma of the samples, 0–255. */
   readonly meanLuma: number;
-  /** True when the frame is (near) one colour: nothing, or nothing visible, was drawn. */
+  /** True when nearly every sample is the same colour: the picture is uniform. */
   readonly flat: boolean;
+  /** Share of samples (0–1) that carry the most common colour. */
+  readonly dominantShare?: number;
 }
 
 export function readPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
@@ -166,21 +178,26 @@ function sampleAt(png: DecodedPng, gx: number, gy: number): [number, number, num
 }
 
 export function frameMetrics(png: DecodedPng): FrameMetrics {
-  const colours = new Set<number>();
+  const counts = new Map<number, number>();
   let luma = 0;
   for (let gy = 0; gy < GRID; gy++) {
     for (let gx = 0; gx < GRID; gx++) {
       const [r, g, b] = sampleAt(png, gx, gy);
-      colours.add(((r >> QUANT_SHIFT) << 8) | ((g >> QUANT_SHIFT) << 4) | (b >> QUANT_SHIFT));
+      const quantized = ((r >> QUANT_SHIFT) << 8) | ((g >> QUANT_SHIFT) << 4) | (b >> QUANT_SHIFT);
+      counts.set(quantized, (counts.get(quantized) ?? 0) + 1);
       luma += 0.299 * r + 0.587 * g + 0.114 * b;
     }
   }
+  const samples = GRID * GRID;
+  const dominant = Math.max(0, ...counts.values());
   return {
     width: png.width,
     height: png.height,
-    colours: colours.size,
-    meanLuma: Math.round(luma / (GRID * GRID)),
-    flat: colours.size <= FLAT_FRAME_MAX_COLOURS,
+    colours: counts.size,
+    meanLuma: Math.round(luma / samples),
+    // UNIFORM, not monochrome (Codex 2026-09-13 AH#4).
+    flat: dominant / samples >= FLAT_FRAME_MIN_DOMINANT_SHARE,
+    dominantShare: Number((dominant / samples).toFixed(4)),
   };
 }
 

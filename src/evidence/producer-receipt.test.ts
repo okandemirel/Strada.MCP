@@ -33,6 +33,18 @@ describe('producer receipts', () => {
     expect(json['artifactSha256']).toBeUndefined();
   });
 
+  it('tells two artifacts of the SAME SIZE apart (Codex 2026-09-13 AH#8)', () => {
+    // The digest hashed paths and sizes, so two different 26 648-byte files
+    // were the same artifact as far as a ticket was concerned.
+    const make = (name: string, fill: number): string => {
+      const app = join(dir, name, 'Contents', 'MacOS');
+      mkdirSync(app, { recursive: true });
+      writeFileSync(join(app, 'Game'), Buffer.alloc(26_648, fill));
+      return join(dir, name);
+    };
+    expect(artifactDigest(make('A.app', 1))).not.toBe(artifactDigest(make('B.app', 2)));
+  });
+
   it('digests a bundle DIRECTORY as one artifact, and says nothing about one that is not there', () => {
     const app = join(dir, 'Game.app');
     mkdirSync(join(app, 'Contents', 'MacOS'), { recursive: true });
