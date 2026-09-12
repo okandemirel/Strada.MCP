@@ -367,7 +367,14 @@ describe('an adopted session whose content nobody could identify', () => {
       's.identityVerified = observed == s.requestedIndex',
       'public int requestedIndex;',
       'public int observedIndex;',
+      // …and for a session the test STARTED itself: accepting our own
+      // request as proof let a driver that clamps StartSession(7) to level 1
+      // certify level 7 (Codex 2026-09-12 Z#6).
+      'IActiveSession activeNow = null',
+      's.identityVerified = running == 0 || running == s.requestedIndex',
     ])
       expect(source, needle).toContain(needle);
+    // Nothing claims verification before the session is under way.
+    expect(source).not.toContain('s.identityVerified = true;');
   });
 });

@@ -346,7 +346,6 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 else
                 {
                     if (si > 0) for (var settle = 0; settle < 5; settle++) yield return null;
-                    s.identityVerified = true;
                     try { s.startAccepted = driver.StartSession(s.index); }
                     catch (Exception e)
                     {
@@ -357,6 +356,24 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 if (si == 0) Mirror(record, s);
                 yield return null;
                 if (!s.startAccepted) { s.outcome = "None"; if (si == 0) Mirror(record, s); break; }
+                // WHAT IS ACTUALLY RUNNING, asked after the session is under
+                // way — for a session this test started too. Accepting our own
+                // request as proof let a driver that clamps StartSession(7) to
+                // level 1 certify level 7 (Codex 2026-09-12 Z#6).
+                if (!(si == 0 && record.autoStarted))
+                {
+                    IActiveSession activeNow = null;
+                    try { GameBootstrapper.Services.TryGet(out activeNow); } catch { activeNow = null; }
+                    var running = 0;
+                    if (activeNow != null)
+                    {
+                        try { running = activeNow.ActiveSession; }
+                        catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[ActiveSession] " + e.GetType().Name + ": " + e.Message); }
+                    }
+                    s.observedIndex = running;
+                    s.identityVerified = running == 0 || running == s.requestedIndex;
+                    if (running > 0) s.index = running;
+                }
 
                 var playDeadline = Time.realtimeSinceStartup + deadlineSeconds;
                 var playStarted = Time.realtimeSinceStartup;
