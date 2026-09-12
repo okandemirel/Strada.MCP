@@ -413,15 +413,15 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                         try { if (driver.Act()) s.actions++; }
                         catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[Act] " + e.GetType().Name + ": " + e.Message); }
                     }
-                    yield return null;
+                    // The capture happens BEFORE the yield whose delta it
+                    // distorts: capturing after it stalled the frame already
+                    // measured and excluded an innocent one instead (Codex
+                    // 2026-09-12 AB J4.5). And only a capture that was actually
+                    // written excludes anything (AA).
                     frame++;
-                    // The frame after a capture is excluded because writing one
-                    // stalls it — but only when one was actually written. Past
-                    // the frame budget Capture() does nothing and every
-                    // fifteenth frame was still discarded, so a run hitching on
-                    // those frames reported a clean frame rate (Codex
-                    // 2026-09-12 AA).
-                    if (frame % FramesBetweenCaptures == 0) skipDelta = Capture(record, captureDir, camera, target, readback);
+                    skipDelta = frame % FramesBetweenCaptures == 0
+                        && Capture(record, captureDir, camera, target, readback);
+                    yield return null;
                 }
                 s.seconds = Time.realtimeSinceStartup - playStarted;
                 wallPlaySeconds += s.seconds;

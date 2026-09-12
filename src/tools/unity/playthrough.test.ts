@@ -378,7 +378,9 @@ describe('an adopted session whose content nobody could identify', () => {
       // The frame after a capture is excluded only when one was WRITTEN: past
       // the frame budget every fifteenth frame was discarded anyway, so a run
       // hitching on those frames reported a clean frame rate (AA).
-      'skipDelta = Capture(record, captureDir, camera, target, readback)',
+      // …and the capture happens BEFORE the yield whose delta it distorts
+      // (AB J4.5): capturing after it stalled the frame already measured.
+      'skipDelta = frame % FramesBetweenCaptures == 0',
       'static bool Capture(',
     ])
       expect(source, needle).toContain(needle);

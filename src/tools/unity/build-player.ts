@@ -93,7 +93,15 @@ export function judgePlayerBuild(resultPath: string, exitCode: number, log: stri
   let result: PlayerBuildResult | null = null;
   if (existsSync(resultPath)) {
     try {
-      result = JSON.parse(readFileSync(resultPath, 'utf8')) as PlayerBuildResult;
+      const parsed: unknown = JSON.parse(readFileSync(resultPath, 'utf8'));
+      // A REPORT HAS TO BE A REPORT. `null` parses, and `result === null` then
+      // meant "no report to judge" — so a null file with exit 0 came back
+      // ok:true with no artifact and no reasons (Codex 2026-09-12 AB J4.4).
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed) || typeof (parsed as PlayerBuildResult).built !== 'boolean') {
+        reasons.push('the build result file is not a build report (no `built` flag)');
+      } else {
+        result = parsed as PlayerBuildResult;
+      }
     } catch (error) {
       reasons.push(`the build result file is not valid JSON (${String(error)})`);
     }

@@ -89,6 +89,15 @@ describe('a build Unity did not finish normally', () => {
       const killed = judgePlayerBuild(resultPath, -1, '');
       expect(killed.ok).toBe(false);
       expect(killed.reasons.join(' ')).toContain('never exited normally');
+
+      // A REPORT HAS TO BE A REPORT: `null` parses, and "no report to judge"
+      // then let a clean exit pass with no artifact at all (Codex AB J4.4).
+      writeFileSync(resultPath, 'null');
+      const nulled = judgePlayerBuild(resultPath, 0, '');
+      expect(nulled.ok).toBe(false);
+      expect(nulled.reasons.join(' ')).toContain('not a build report');
+      writeFileSync(resultPath, '{"built":"yes"}');
+      expect(judgePlayerBuild(resultPath, 0, '').ok).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
