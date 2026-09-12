@@ -371,7 +371,10 @@ describe('an adopted session whose content nobody could identify', () => {
       // request as proof let a driver that clamps StartSession(7) to level 1
       // certify level 7 (Codex 2026-09-12 Z#6).
       'IActiveSession activeNow = null',
-      's.identityVerified = running == 0 || running == s.requestedIndex',
+      // A PRESENT service reporting zero is NO session running, not "cannot
+      // tell": only a game with no identity service keeps its own acceptance
+      // (Codex 2026-09-12 AA#3).
+      's.identityVerified = activeNow == null || running == s.requestedIndex',
     ])
       expect(source, needle).toContain(needle);
     // Nothing claims verification before the session is under way.
