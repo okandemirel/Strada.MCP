@@ -142,9 +142,64 @@ interface CompileStatusResult {
 interface TestResultsPayload {
   runId?: string | null;
   status?: string;
+  /**
+   * The suite's OWN OUTCOME, which the editor reports separately from the run
+   * state: "completed" says the run ended, "Failed" says what it ended as.
+   */
+  result?: string;
   tests?: Array<Record<string, unknown>>;
   summary?: Record<string, unknown>;
   failedTests?: Array<Record<string, unknown>>;
+}
+
+const SUITE_SUCCESS = new Set(['passed', 'success', 'succeeded', 'ok']);
+const RUN_ENDED = new Set(['completed', 'finished', 'complete', 'done']);
+
+/**
+ * WHETHER A SUITE ACTUALLY VERIFIED ANYTHING. Only the failed COUNT was read,
+ * so the live editor bridge's
+ *   {"status":"completed","result":"Failed","summary":{"total":10,"passed":0,"failed":0,"skipped":10}}
+ * was reported `status:"passed", isError:false` — and so were "Cancelled" and
+ * "Inconclusive" (Codex 2026-09-12 AC J4.1). A suite passes when it ended,
+ * ended in success, executed something, and every test it counted is
+ * accounted for. Skips are disclosed, never a pass on their own.
+ */
+export function judgeSuiteResult(tests: TestResultsPayload | undefined): { ok: boolean; reason?: string } {
+  if (!tests) return { ok: false, reason: 'no test run reported a result, so nothing was verified' };
+  const state = String(tests.status ?? '').trim().toLowerCase();
+  if (state !== '' && !RUN_ENDED.has(state) && !SUITE_SUCCESS.has(state)) {
+    return { ok: false, reason: `the test run ended in state "${tests.status}" — it did not run to a normal end` };
+  }
+  const outcome = String(tests.result ?? '').trim().toLowerCase();
+  if (outcome !== '' && !SUITE_SUCCESS.has(outcome)) {
+    return { ok: false, reason: `the test run's own result is "${tests.result}", not a pass` };
+  }
+  const total = Number(tests.summary?.total ?? Number.NaN);
+  if (!Number.isFinite(total) || total <= 0) {
+    return { ok: false, reason: 'the test run reported no tests at all' };
+  }
+  const skipped = Number(tests.summary?.skipped ?? 0);
+  const executed = total - (Number.isFinite(skipped) ? skipped : 0);
+  if (executed <= 0) {
+    return { ok: false, reason: `all ${total} test(s) were skipped, so nothing was verified` };
+  }
+  const passed = Number(tests.summary?.passed ?? Number.NaN);
+  const failed = Number(tests.summary?.failed ?? 0);
+  // EVERY TEST ACCOUNTED FOR. A summary of total 278 / passed 275 / skipped 2
+  // / failed 0 leaves one test that neither passed, failed nor was skipped —
+  // an unverified claim reported as a green suite.
+  if (Number.isFinite(passed)) {
+    const counted = passed + (Number.isFinite(failed) ? failed : 0) + (Number.isFinite(skipped) ? skipped : 0);
+    if (counted < total) {
+      return {
+        ok: false,
+        reason:
+          `the test run counted ${total} test(s) but accounts for only ${counted} ` +
+          `(passed ${passed}, failed ${Number.isFinite(failed) ? failed : 'unknown'}, skipped ${Number.isFinite(skipped) ? skipped : 'unknown'})`,
+      };
+    }
+  }
+  return { ok: true };
 }
 
 abstract class SimpleJsonBridgeTool extends BridgeTool {
@@ -719,6 +774,9 @@ export class VerifyChangeTool extends CompositeBridgeTool {
     // compile, filter matched nothing) proved nothing. Same rule the headless
     // playmode path has always enforced.
     const testTotal = Number(tests?.summary?.total ?? Number.NaN);
+    // A SUITE THAT DID NOT PASS IS NOT A PASS, whatever its failure count
+    // says (Codex 2026-09-12 AC J4.1).
+    const suite = parsed.runTests === true ? judgeSuiteResult(tests) : { ok: true as const, reason: undefined };
     const emptyTestRun =
       parsed.runTests === true && (!Number.isFinite(testTotal) || testTotal === 0);
     const compileIssues = Number(compile?.compile?.compileIssueCount ?? 0);
@@ -726,7 +784,7 @@ export class VerifyChangeTool extends CompositeBridgeTool {
     return {
       content: JSON.stringify({
         status:
-          compileIssues === 0 && testFailures === 0 && !emptyTestRun && (build?.success ?? true)
+          compileIssues === 0 && testFailures === 0 && !emptyTestRun && suite.ok && (build?.success ?? true)
             ? 'passed'
             : 'failed',
         ...(emptyTestRun
@@ -735,16 +793,22 @@ export class VerifyChangeTool extends CompositeBridgeTool {
                 'The test run reported ZERO tests — nothing executed, so nothing was verified. ' +
                 'A test assembly that fails to compile is silently left out by Unity.',
             }
-          : {}),
+          : suite.ok
+          ? {}
+          : { reason: `The test run did not verify this change: ${suite.reason}.` }),
         summary: {
           compileIssues,
           testFailures,
           testTotal: Number.isFinite(testTotal) ? testTotal : null,
+          // WHAT THE SUITE SAID OF ITSELF, and how many tests it never ran:
+          // both were invisible in the report while the status said "passed".
+          testsSkipped: Number.isFinite(Number(tests?.summary?.skipped)) ? Number(tests?.summary?.skipped) : null,
+          suiteResult: tests?.result ?? tests?.status ?? null,
           buildSuccess: build?.success ?? null,
         },
         evidence,
       }, null, 2),
-      isError: compileIssues > 0 || testFailures > 0 || emptyTestRun || build?.success === false,
+      isError: compileIssues > 0 || testFailures > 0 || emptyTestRun || !suite.ok || build?.success === false,
     };
     });
   }

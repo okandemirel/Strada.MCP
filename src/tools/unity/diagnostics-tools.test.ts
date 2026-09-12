@@ -187,6 +187,105 @@ describe('VerifyChangeTool', () => {
     expect(result.content).toContain('"status": "passed"');
   });
 
+  /**
+   * Codex round AC, executed against the live bridge branch: a suite that
+   * ended "Failed" with every test skipped and no failure count was reported
+   * `status:"passed", isError:false` — and so were "Cancelled" and
+   * "Inconclusive".
+   */
+  describe('a suite that did not pass is not a pass (Codex 2026-09-12 AC J4.1)', () => {
+    const bridgeWith = (tests: Record<string, unknown>): BridgeClient =>
+      createMockBridge(async (method) => {
+        switch (method) {
+          case 'editor.recompile':
+            return { requested: true };
+          case 'editor.compileStatus':
+            return { isCompiling: false, isReloading: false, compileIssueCount: 0 };
+          case 'editor.getConsoleLogs':
+            return { entries: [], totalCount: 0 };
+          case 'editor.runTests':
+            return { runId: 'r1' };
+          case 'editor.testResults':
+            return { runId: 'r1', ...tests };
+          default:
+            return {};
+        }
+      });
+    const verify = async (tests: Record<string, unknown>) => {
+      const tool = new VerifyChangeTool();
+      tool.setBridgeClient(bridgeWith(tests));
+      const result = await tool.execute({ runTests: true, testMode: 'play' }, createContext());
+      return { result, payload: JSON.parse(result.content) as Record<string, any> };
+    };
+
+    it('refuses a run whose own result is Failed, Cancelled or Inconclusive', async () => {
+      for (const outcome of ['Failed', 'Cancelled', 'Inconclusive']) {
+        const { result, payload } = await verify({
+          status: 'completed',
+          result: outcome,
+          summary: { total: 10, passed: 10, failed: 0, skipped: 0 },
+        });
+        expect(payload['status']).toBe('failed');
+        expect(result.isError).toBe(true);
+        expect(String(payload['reason'])).toContain(outcome);
+      }
+    });
+
+    it('refuses a run in which every test was skipped, and discloses the skips', async () => {
+      const { result, payload } = await verify({
+        status: 'completed',
+        summary: { total: 10, passed: 0, failed: 0, skipped: 10 },
+      });
+      expect(payload['status']).toBe('failed');
+      expect(result.isError).toBe(true);
+      expect(String(payload['reason'])).toContain('skipped');
+      expect(payload['summary']['testsSkipped']).toBe(10);
+    });
+
+    it('refuses a summary that does not account for every test it counted', async () => {
+      const { payload } = await verify({
+        status: 'completed',
+        summary: { total: 278, passed: 275, failed: 0, skipped: 2 },
+      });
+      expect(payload['status']).toBe('failed');
+      expect(String(payload['reason'])).toContain('accounts for only 277');
+    });
+
+    it('refuses a run that never reached an end state, however clean its counts', async () => {
+      // The poll gives up with `status:"timeout"`, and an "error" run has
+      // counts that describe an unfinished suite. (A still-"running" payload
+      // never reaches the judge: the poller waits for it.)
+      for (const state of ['timeout', 'error']) {
+        const { result, payload } = await verify({
+          status: state,
+          summary: { total: 10, passed: 10, failed: 0, skipped: 0 },
+        });
+        expect(payload['status']).toBe('failed');
+        expect(result.isError).toBe(true);
+        expect(String(payload['reason'])).toContain(state);
+      }
+    });
+
+    it('passes a suite that ran, passed and accounts for its tests — skips disclosed', async () => {
+      const { result, payload } = await verify({
+        status: 'completed',
+        result: 'Passed',
+        summary: { total: 10, passed: 8, failed: 0, skipped: 2 },
+      });
+      expect(payload['status']).toBe('passed');
+      expect(result.isError).toBeFalsy();
+      expect(payload['summary']['testsSkipped']).toBe(2);
+      expect(payload['summary']['suiteResult']).toBe('Passed');
+    });
+
+    it('still passes a producer that reports no result field at all', async () => {
+      // A bridge that reports only the run state and counts is read exactly as
+      // before: absent is not failed.
+      const { payload } = await verify({ status: 'completed', summary: { total: 4, failed: 0 } });
+      expect(payload['status']).toBe('passed');
+    });
+  });
+
   it('verifies offline when the editor is closed', async () => {
     // "Verify my change" used to give up the moment no bridge was connected,
     // leaving an agent with no way to check its own work. Measured: a run ended

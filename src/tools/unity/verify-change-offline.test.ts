@@ -434,8 +434,14 @@ describe("what a passing compile does not cover", () => {
     const result = await new VerifyChangeTool().execute({ runTests: true, testMode: 'play' }, context());
     const payload = JSON.parse(String(result.content));
 
+    // The offline path no longer drops the request with a note: since
+    // 2026-09-10 it RUNS the suite through the headless PlayMode runner. When
+    // that run cannot start — as here, with no editor to launch — the verdict
+    // is "tests-not-run" and says why, never "passed".
     expect(payload.status).toBe('tests-not-run');
-    expect(payload.runTestsIgnored).toContain('unity_playmode_verify');
+    expect(payload.tests.ran).toBe(false);
+    expect(String(payload.tests.note)).toMatch(/could not start/i);
+    expect(payload.status).not.toBe('passed');
     expect(result.isError).toBe(true);
   });
 
