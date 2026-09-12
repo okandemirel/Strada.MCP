@@ -347,6 +347,9 @@ describe('the emitted play-through test', () => {
       'static string ContentFingerprint()',
       'SceneManager.GetActiveScene()',
       'Time.realtimeSinceStartup + SessionReadySeconds',
+      // The outcome contract reaches the RUNNER, not only the judge (AH#1).
+      'STRADA_PLAYTHROUGH_OUTCOME_REQUIRED',
+      'if (outcomeRequired)',
       'if (running == s.requestedIndex) break;',
       // A capture belongs to a session, and each session has its own budget
       // (AG#6).

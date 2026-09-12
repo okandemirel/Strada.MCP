@@ -688,6 +688,11 @@ export class PlaythroughTool implements ITool {
       if (typeof input['sessions'] === 'string' && input['sessions'].trim()) env['STRADA_PLAYTHROUGH_SESSIONS'] = input['sessions'].trim();
       if (typeof input['maxActions'] === 'number') env['STRADA_PLAYTHROUGH_MAX_ACTIONS'] = String(Math.floor(input['maxActions']));
       if (typeof input['deadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_DEADLINE_S'] = String(Math.floor(input['deadlineSeconds']));
+      // THE OUTCOME CONTRACT REACHES THE RUNNER, not only the judge: the
+      // generated test asserted an outcome unconditionally, so an endless
+      // session failed the run whatever the judge said (Codex 2026-09-13
+      // AH#1).
+      if (input['outcomeRequired'] === true) env['STRADA_PLAYTHROUGH_OUTCOME_REQUIRED'] = '1';
       if (typeof input['bootDeadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_BOOT_DEADLINE_S'] = String(Math.floor(input['bootDeadlineSeconds']));
 
       const exitCode = await runUnityProcess(editor.binary, args, 580_000, env);

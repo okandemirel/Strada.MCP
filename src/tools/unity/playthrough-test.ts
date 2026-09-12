@@ -202,7 +202,10 @@ public class ${PLAYTHROUGH_TEST_CLASS}
 
     const int Width = 1280;
     const int Height = 720;
-    const int MaxFrames = 40;
+    // THE GLOBAL CEILING FITS EVERY SESSION'S BUDGET: forty shared frames
+    // left later sessions with none, and the judge now requires a frame of
+    // each session that played (Codex 2026-09-13 AH#3).
+    const int MaxFrames = ${MAX_SESSIONS_PER_RUN} * MaxFramesPerSession + 8;
     const int FramesBetweenCaptures = 15;
     // EACH SESSION KEEPS ITS OWN BUDGET, and a capture names the session it
     // belongs to: one shared budget was spent on the first session, so later
@@ -242,6 +245,8 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         record.driverType = ${JSON.stringify(PLAYTHROUGH_DRIVER_TYPE)};
         var maxActions = EnvInt("STRADA_PLAYTHROUGH_MAX_ACTIONS", 60);
         var deadlineSeconds = EnvInt("STRADA_PLAYTHROUGH_DEADLINE_S", 45);
+        // Does the game's own document require a session to END? (AH#1)
+        var outcomeRequired = EnvInt("STRADA_PLAYTHROUGH_OUTCOME_REQUIRED", 0) == 1;
         var captureDir = Env("STRADA_CAPTURE_DIR", null);
         var jsonPath = Env("STRADA_PLAYTHROUGH_JSON", captureDir == null ? null : Path.Combine(captureDir, ${JSON.stringify(PLAYTHROUGH_RECORD_FILE)}));
         var started = Time.realtimeSinceStartup;
@@ -468,7 +473,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 // spent mid-play still shows how it ENDED (AG#6).
                 sessionFrames = 0;
                 Capture(record, captureDir, camera, target, readback);
-                if (!s.reachedOutcome) break;
+                // A session that did not end stops the run only when an
+                // outcome was required (Codex 2026-09-13 AH#1).
+                if (!s.reachedOutcome && outcomeRequired) break;
             }
             if (record.playFrames == 0) record.playSeconds = wallPlaySeconds;
             record.runtime = DumpRuntime();
@@ -476,11 +483,16 @@ public class ${PLAYTHROUGH_TEST_CLASS}
 
             foreach (var s in record.sessions)
                 Assert.IsTrue(s.startAccepted, "The driver refused to start session " + s.index + ".");
-            foreach (var s in record.sessions)
-                Assert.IsTrue(
-                    s.reachedOutcome,
-                    "Session " + s.index + " never ended after " + s.actions + " actions in " + deadlineSeconds
-                    + " s; last phase " + s.lastPhase + ".");
+            // AN OUTCOME ONLY WHERE THE DOCUMENT ASKS FOR ONE. This assertion
+            // was unconditional, so an endless or sandbox session that played
+            // correctly failed the test — a verdict no correct implementation
+            // could satisfy (Codex 2026-09-13 AH#1).
+            if (outcomeRequired)
+                foreach (var s in record.sessions)
+                    Assert.IsTrue(
+                        s.reachedOutcome,
+                        "Session " + s.index + " never ended after " + s.actions + " actions in " + deadlineSeconds
+                        + " s; last phase " + s.lastPhase + ".");
         }
         finally
         {

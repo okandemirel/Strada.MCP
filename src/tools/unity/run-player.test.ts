@@ -80,6 +80,44 @@ describe('unity_run_player', () => {
     expect(JSON.parse(readFileSync(verdictPath, 'utf8')).perf).toMatchObject({ medium: 'player', avgFps: 60 });
   });
 
+  it('an endless session passes, and the contract reaches the player (Codex 2026-09-13 AH#1)', async () => {
+    // A sandbox that stays interactive is behaving as designed. The contract
+    // went to the editor path and not to this one, so the player run still
+    // came back refused.
+    const endless = {
+      ...playerRecord,
+      outcome: 'None',
+      reachedOutcome: false,
+      phasesSeen: ['Playing'],
+      sessions: [{ index: 1, startAccepted: true, phasesSeen: ['Playing'], actions: 60, outcome: 'None', reachedOutcome: false, seconds: 45, lastPhase: 'Playing' }],
+    };
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', endless);
+    const tool = new RunPlayerTool();
+
+    const sandbox = await tool.execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+    expect(sandbox.isError).toBe(false);
+    expect(sandbox.content).toContain('PLAY-THROUGH OK');
+
+    // The flag reaches the PLAYER's own arguments, so Core can decide how to
+    // exit — the judge alone is not enough (AH#1).
+    const args: string[] = [];
+    const recording = join(root, 'Builds', 'linux', 'Game.x86_64');
+    writeFileSync(
+      recording,
+      `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(join(root, 'args.txt'))}\nexit 0\n`,
+    );
+    chmodSync(recording, 0o755);
+    await tool.execute({ deadlineSeconds: 5, outcomeRequired: true }, { projectPath: root } as never);
+    args.push(...readFileSync(join(root, 'args.txt'), 'utf8').split('\n'));
+    expect(args).toContain('-stradaPlaythroughOutcomeRequired');
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', endless);
+
+    // …and a document that DOES require an outcome still refuses it.
+    const required = await tool.execute({ deadlineSeconds: 5, outcomeRequired: true }, { projectPath: root } as never);
+    expect(required.isError).toBe(true);
+    expect(required.content).toContain('never ended after 60 actions');
+  });
+
   it('a player that writes no record is not ok, and the header says why', async () => {
     const dir = join(root, 'Builds', 'linux');
     mkdirSync(dir, { recursive: true });

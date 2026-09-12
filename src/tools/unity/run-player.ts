@@ -115,6 +115,13 @@ export class RunPlayerTool implements ITool {
       },
       maxActions: { type: 'number', description: 'Upper bound on driver actions per session (default 60).' },
       deadlineSeconds: { type: 'number', description: 'How long a session may run before it is judged unfinished (default 45).' },
+      outcomeRequired: {
+        type: 'boolean',
+        description:
+          'Does the game\'s own document require a session to END (a win or a lose state)? Default false: an endless ' +
+          'or sandbox session that stays interactive is behaving as designed, and its lack of an outcome is disclosed ' +
+          'rather than held against it.',
+      },
       bootDeadlineSeconds: { type: 'number', description: 'How long the bootstrapper may take to publish its services (default 30).' },
       captureDir: { type: 'string', description: `Where frames, the record and the verdict go (default <projectPath>/${PLAYER_CAPTURE_SUBDIR}; wiped before the run).` },
     },
@@ -168,11 +175,16 @@ export class RunPlayerTool implements ITool {
     if (typeof input['session'] === 'number') args.push('-stradaPlaythroughSession', String(Math.floor(input['session'])));
     if (typeof input['sessions'] === 'string' && input['sessions'].trim()) args.push('-stradaPlaythroughSessions', input['sessions'].trim());
     if (typeof input['maxActions'] === 'number') args.push('-stradaPlaythroughMaxActions', String(Math.floor(input['maxActions'])));
+    // THE OUTCOME CONTRACT REACHES THE PLAYER. It went to the editor path and
+    // not to this one, so an endless game's player run still exited 30 and
+    // was refused (Codex 2026-09-13 AH#1).
+    const outcomeRequired = input['outcomeRequired'] === true;
+    if (outcomeRequired) args.push('-stradaPlaythroughOutcomeRequired', '1');
     const sessionsRequested = typeof input['sessions'] === 'string' ? MAX_SESSIONS_PER_RUN : 1;
     const timeoutMs = (boot + 15 + sessionsRequested * (deadline + 5)) * 1000 + 30_000;
     const exitCode = await runPlayerProcess(executable, args, timeoutMs);
     const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
-    const judged = judgePlaythrough(captureDir, undefined, log);
+    const judged = judgePlaythrough(captureDir, undefined, log, { outcomeRequired });
     // A PLAYER THAT DIED IS NOT A PLAYER THAT PLAYED. The exit code was
     // printed in the header and nowhere else: the verdict FILE — which is
     // what Strada.Brain reads — stayed green on exit 42, and `isError` said
