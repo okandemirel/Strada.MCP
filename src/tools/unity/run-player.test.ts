@@ -73,7 +73,7 @@ describe('unity_run_player', () => {
     expect(result.isError).toBe(false);
     expect(result.content).toContain('Player: Game.x86_64');
     expect(result.content).toContain('PLAY-THROUGH OK');
-    expect(result.content).toContain('Performance (built player, real rendering): boot 1.2 s to services; 240 frames in 4.0 s = 60.0 fps average; worst frame 21 ms.');
+    expect(result.content).toContain('Performance (built player, real rendering): boot 1.2 s from launch to services; 240 frames in 4.0 s = 60.0 fps average; worst frame 21 ms.');
     expect(result.content).toContain('Sessions: catalog 3 session(s); played 1: #1 Won in 9 actions (4.0 s).');
     const verdictPath = join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json');
     expect(existsSync(verdictPath)).toBe(true);

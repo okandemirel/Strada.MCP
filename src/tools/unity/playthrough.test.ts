@@ -69,7 +69,7 @@ describe('the play-through verdict is derived from the record, the pixels and th
     expect(perf?.medium).toBe('player');
     writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, medium: 'player', bootSeconds: 1.1, playSeconds: 10, playFrames: 600, worstFrameMs: 33 }));
     frames(drawn(0), drawn(40), drawn(90));
-    expect(renderVerdict(judgePlaythrough(dir), dir)).toContain('Performance (built player, real rendering): boot 1.1 s to services; 600 frames in 10.0 s = 60.0 fps average; worst frame 33 ms.');
+    expect(renderVerdict(judgePlaythrough(dir), dir)).toContain('Performance (built player, real rendering): boot 1.1 s from launch to services; 600 frames in 10.0 s = 60.0 fps average; worst frame 33 ms.');
   });
 
   it('a record from an older test, or a run that never reached play, carries no performance', () => {

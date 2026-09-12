@@ -397,7 +397,15 @@ export function renderRuntime(d: RuntimeDump): string {
 /** One line, naming the medium: numbers from the batch editor are not the player's. */
 export function renderPerf(p: PlaythroughPerf): string {
   const parts: string[] = [];
-  if (p.bootSeconds !== undefined) parts.push(`boot ${p.bootSeconds.toFixed(1)} s to services`);
+  if (p.bootSeconds !== undefined) {
+    // The built player measures this from its own launch (Strada.Core, Codex
+    // 2026-09-12 AB J4.2); the editor's is from scene load.
+    parts.push(
+      p.medium === 'player'
+        ? `boot ${p.bootSeconds.toFixed(1)} s from launch to services`
+        : `boot ${p.bootSeconds.toFixed(1)} s to services`,
+    );
+  }
   if (p.playFrames > 0 && p.avgFps !== undefined) {
     parts.push(`${p.playFrames} frames in ${p.playSeconds.toFixed(1)} s = ${p.avgFps.toFixed(1)} fps average`);
   } else if (p.playSeconds > 0) parts.push(`${p.playSeconds.toFixed(1)} s of play, no frame timing recorded`);
