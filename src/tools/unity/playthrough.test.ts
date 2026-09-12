@@ -90,12 +90,16 @@ describe('the play-through verdict is derived from the record, the pixels and th
     ];
     writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, sessionCount: 12, sessions }));
     frames(drawn(0), drawn(40), drawn(90));
-    const v = judgePlaythrough(dir);
+    const v = judgePlaythrough(dir, undefined, undefined, { outcomeRequired: true });
     expect(v.ok).toBe(false);
     expect(v.reasons).toEqual([
       'session 2 never ended after 60 actions (phases seen: Playing)',
       'the driver refused to start session 3',
     ]);
+    // A REFUSED START is a refusal whatever the document requires: the game
+    // would not begin the content it was asked for.
+    const endless = judgePlaythrough(dir);
+    expect(endless.reasons).toEqual(['the driver refused to start session 3']);
     const text = renderVerdict(v, dir);
     expect(text).toContain('Sessions: catalog 12 session(s); played 3: #1 Won in 14 actions (12.1 s), #2 never ended in 60 actions (45.0 s), #3 refused.');
     expect(renderSessions({ ...goodRecord, sessionCount: -1 })).toBe(
@@ -114,15 +118,23 @@ describe('the play-through verdict is derived from the record, the pixels and th
     expect(renderRuntime({ ...runtime, sprites: [], meshes: [], primitiveMeshes: 0 })).toBe('Runtime at end of play: 12 world renderer(s) (10 sprite, 2 mesh); 1 canvas(es), 1 particle system(s), 2 audio source(s), 1 playing.');
   });
 
-  it('a session that never ended is not ok, and the reason names the actions and the phases', () => {
+  it('a session that never ended fails only when an outcome was REQUIRED (Codex 2026-09-13 AG#3)', () => {
     writeFileSync(
       join(dir, 'playthrough.json'),
       JSON.stringify({ ...goodRecord, reachedOutcome: false, outcome: 'None', phasesSeen: ['Playing'], actions: 60 }),
     );
     frames(drawn(0), drawn(40));
-    const v = judgePlaythrough(dir);
-    expect(v.ok).toBe(false);
-    expect(v.reasons.join('\n')).toMatch(/session 1 never ended after 60 actions \(phases seen: Playing\)/);
+    const required = judgePlaythrough(dir, undefined, undefined, { outcomeRequired: true });
+    expect(required.ok).toBe(false);
+    expect(required.reasons.join('\n')).toMatch(/session 1 never ended after 60 actions \(phases seen: Playing\)/);
+
+    // An endless or sandbox session that stays interactive, acts and draws is
+    // a game behaving as designed — and no correct implementation could have
+    // satisfied the old rule.
+    const endless = judgePlaythrough(dir);
+    expect(endless.ok).toBe(true);
+    expect((endless.notes ?? []).join('\n')).toMatch(/never ended after 60 actions.*no terminal outcome was required/);
+    expect(endless.reasons).toEqual([]);
   });
 
   it('a game that registers no driver is named as unplayable by the framework', () => {

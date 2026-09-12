@@ -158,6 +158,12 @@ export interface PlaythroughVerdict {
   readonly ok: boolean;
   /** Each reason the verdict is not ok; empty when ok. */
   readonly reasons: string[];
+  /**
+   * What the run observed and did NOT hold against the game: a session that
+   * stayed interactive where no outcome was required, for instance (Codex
+   * 2026-09-13 AG#3). Disclosure, never a refusal.
+   */
+  readonly notes?: string[];
   readonly record: PlaythroughRecord | null;
   readonly frames: {
     readonly count: number;
@@ -224,7 +230,20 @@ export function judgePlaythrough(
   captureDir: string,
   test?: { total: number; passed: number; failed: number; result: string },
   unityLog?: string,
+  /**
+   * Does the caller's own document require a session to END?
+   *
+   * An endless or sandbox session that stays interactive, acts and draws is a
+   * game behaving as designed — and it was reported `ok: false, "session 1
+   * never ended after 60 actions"`, which no amount of correct implementation
+   * could change (Codex 2026-09-13 AG#3). When no outcome is required the
+   * absence of one is DISCLOSED, not a failure. Default: not required —
+   * a producer cannot know a game's win condition, and the caller can.
+   */
+  opts?: { outcomeRequired?: boolean },
 ): PlaythroughVerdict {
+  const outcomeRequired = opts?.outcomeRequired === true;
+  const notes: string[] = [];
   const reasons: string[] = [];
   let record: PlaythroughRecord | null = null;
   const recordPath = join(captureDir, PLAYTHROUGH_RECORD_FILE);
@@ -277,18 +296,20 @@ export function judgePlaythrough(
       for (const s of sessions) {
         if (!s.startAccepted) reasons.push(`the driver refused to start session ${s.index}`);
         else if (!s.reachedOutcome) {
-          reasons.push(
+          const said =
             `session ${s.index} never ended after ${s.actions} actions ` +
-              `(phases seen: ${s.phasesSeen.length > 0 ? s.phasesSeen.join(' → ') : 'none'})`,
-          );
+            `(phases seen: ${s.phasesSeen.length > 0 ? s.phasesSeen.join(' → ') : 'none'})`;
+          if (outcomeRequired) reasons.push(said);
+          else notes.push(`${said} — no terminal outcome was required of it`);
         }
       }
     } else if (!record.startAccepted) reasons.push(`the driver refused to start session ${record.session}`);
     else if (!record.reachedOutcome) {
-      reasons.push(
+      const said =
         `session ${record.session} never ended after ${record.actions} actions ` +
-          `(phases seen: ${record.phasesSeen.length > 0 ? record.phasesSeen.join(' → ') : 'none'})`,
-      );
+        `(phases seen: ${record.phasesSeen.length > 0 ? record.phasesSeen.join(' → ') : 'none'})`;
+      if (outcomeRequired) reasons.push(said);
+      else notes.push(`${said} — no terminal outcome was required of it`);
     }
     if (record.errors.length > 0) {
       reasons.push(`${record.errors.length} error(s) logged during play, first: ${record.errors[0]}`);
@@ -320,6 +341,7 @@ export function judgePlaythrough(
   return {
     ok: reasons.length === 0,
     reasons,
+    ...(notes.length > 0 ? { notes } : {}),
     record,
     frames: {
       count: frameFiles.length,
@@ -508,6 +530,13 @@ export class PlaythroughTool implements ITool {
           'maxActions and deadlineSeconds apply per session.',
       },
       maxActions: { type: 'number', description: 'Upper bound on driver actions per session (default 60).' },
+      outcomeRequired: {
+        type: 'boolean',
+        description:
+          'Does the game\'s own document require a session to END (a win or a lose state)? Default false: an endless ' +
+          'or sandbox session that stays interactive, acts and draws is behaving as designed, and the absence of a ' +
+          'terminal outcome is then disclosed rather than held against it.',
+      },
       deadlineSeconds: {
         type: 'number',
         description: 'How long the session may run before the play-through is judged unfinished (default 45).',
@@ -590,7 +619,7 @@ export class PlaythroughTool implements ITool {
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const outcome = existsSync(resultsPath) ? parseTestRun(readFileSync(resultsPath, 'utf8')) : null;
       const verdict = withProcessOutcome(
-        judgePlaythrough(captureDir, outcome ?? undefined, log),
+        judgePlaythrough(captureDir, outcome ?? undefined, log, { outcomeRequired: input['outcomeRequired'] === true }),
         exitCode,
         outcome !== null,
         'editor',
