@@ -159,6 +159,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         // or "unverified" (Codex 2026-09-12 AC J1).
         public string identitySource = "unverified";
         public int observedIndex;
+        // What the RUNNER saw of the content, independently of the game's own
+        // claim about which session it started (Codex 2026-09-13 AG#1).
+        public string contentFingerprint;
     }
 
     /// <summary>"1-3", "2,5", "all" (bounded by the catalog and MAX_SESSIONS_PER_RUN) or a single index; nothing → the default index.</summary>
@@ -358,6 +361,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     // "cannot tell" verified the session we hoped for (Codex
                     // 2026-09-12 AA#3). Only a game that registers no identity
                     // service keeps the benefit of the doubt.
+                    s.contentFingerprint = ContentFingerprint();
                     s.identityVerified = observed == s.requestedIndex;
                     s.identitySource = s.identityVerified ? "active-session" : "unverified";
                     if (observed > 0) s.index = observed;
@@ -394,6 +398,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     // not "cannot tell": accepting it verified a session the
                     // game had not started (Codex 2026-09-12 AA#3). Only a
                     // game with no identity service keeps its own acceptance.
+                    s.contentFingerprint = ContentFingerprint();
                     s.identityVerified = activeNow == null || running == s.requestedIndex;
                     s.identitySource = activeNow == null
                         ? "start-acceptance"
@@ -486,6 +491,38 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 }
                 catch (Exception e) { Debug.LogWarning("playthrough record not written: " + e.Message); }
             }
+        }
+    }
+
+    /// <summary>
+    /// A stable, cheap description of what is loaded right now — the active
+    /// scene, its root objects and how much draws — independent of anything
+    /// the game claims about itself (Codex 2026-09-13 AG#1).
+    /// </summary>
+    static string ContentFingerprint()
+    {
+        try
+        {
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var names = new List<string>();
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                names.Add(root.name);
+                if (names.Count >= 60) break;
+            }
+            names.Sort(StringComparer.Ordinal);
+            var renderers = UnityEngine.Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None).Length;
+            var text = scene.path + "|" + string.Join(",", names) + "|r" + renderers.ToString();
+            unchecked
+            {
+                var hash = 2166136261u;
+                for (var i = 0; i < text.Length; i++) { hash ^= text[i]; hash *= 16777619u; }
+                return hash.ToString("x8") + "-" + names.Count.ToString() + "-" + renderers.ToString();
+            }
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 

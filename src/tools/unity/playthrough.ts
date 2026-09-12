@@ -118,6 +118,12 @@ export interface SessionRecord {
   identitySource?: 'active-session' | 'start-acceptance' | 'unverified';
   /** The index the game reported as active, when it can report one. */
   observedIndex?: number;
+  /**
+   * What the RUNNER saw of the loaded content, independently of the game's own
+   * claim: two sessions with the SAME fingerprint are one level played twice
+   * (Codex 2026-09-13 AG#1). Absent on older records.
+   */
+  contentFingerprint?: string;
 }
 
 /**
