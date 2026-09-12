@@ -375,6 +375,11 @@ describe('an adopted session whose content nobody could identify', () => {
       // tell": only a game with no identity service keeps its own acceptance
       // (Codex 2026-09-12 AA#3).
       's.identityVerified = activeNow == null || running == s.requestedIndex',
+      // The frame after a capture is excluded only when one was WRITTEN: past
+      // the frame budget every fifteenth frame was discarded anyway, so a run
+      // hitching on those frames reported a clean frame rate (AA).
+      'skipDelta = Capture(record, captureDir, camera, target, readback)',
+      'static bool Capture(',
     ])
       expect(source, needle).toContain(needle);
     // Nothing claims verification before the session is under way.

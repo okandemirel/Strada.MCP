@@ -62,3 +62,35 @@ describe('unity_build_player (audited 2026-09-10: every build path needed a live
     expect(sizeOnDisk(join(dir, 'web'))).toBe(1000);
   });
 });
+
+/**
+ * The exit code was consulted only when no result file existed, so a build
+ * whose report said "built" with a real artifact on disk came back ok:true
+ * while Unity had exited 42 — or been killed (Codex 2026-09-12 AA).
+ */
+describe('a build Unity did not finish normally', () => {
+  it('is not ok, however good its report and artifact look', () => {
+    const root = mkdtempSync(join(tmpdir(), 'build-exit-'));
+    try {
+      const out = join(root, 'Builds', 'macos', 'Game.app');
+      mkdirSync(out, { recursive: true });
+      writeFileSync(join(out, 'Game'), 'x'.repeat(4096));
+      const resultPath = join(root, 'result.json');
+      const report = {
+        built: true, target: 'StandaloneOSX', outputPath: out, scenes: ['Assets/Scenes/Entry.unity'],
+        durationMs: 90_000, warnings: 0, errors: [], exitCode: 0,
+      };
+      writeFileSync(resultPath, JSON.stringify(report));
+
+      expect(judgePlayerBuild(resultPath, 0, '').ok).toBe(true);
+      const failed = judgePlayerBuild(resultPath, 42, '');
+      expect(failed.ok).toBe(false);
+      expect(failed.reasons.join(' ')).toContain('Unity exited 42');
+      const killed = judgePlayerBuild(resultPath, -1, '');
+      expect(killed.ok).toBe(false);
+      expect(killed.reasons.join(' ')).toContain('never exited normally');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

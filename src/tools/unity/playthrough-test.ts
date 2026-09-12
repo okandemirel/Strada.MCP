@@ -415,7 +415,13 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     }
                     yield return null;
                     frame++;
-                    if (frame % FramesBetweenCaptures == 0) { Capture(record, captureDir, camera, target, readback); skipDelta = true; }
+                    // The frame after a capture is excluded because writing one
+                    // stalls it — but only when one was actually written. Past
+                    // the frame budget Capture() does nothing and every
+                    // fifteenth frame was still discarded, so a run hitching on
+                    // those frames reported a clean frame rate (Codex
+                    // 2026-09-12 AA).
+                    if (frame % FramesBetweenCaptures == 0) skipDelta = Capture(record, captureDir, camera, target, readback);
                 }
                 s.seconds = Time.realtimeSinceStartup - playStarted;
                 wallPlaySeconds += s.seconds;
@@ -462,9 +468,10 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         }
     }
 
-    static void Capture(Record record, string dir, Camera camera, RenderTexture target, Texture2D readback)
+    /// <summary>Captures a frame; false when nothing was written (no camera, or the frame budget is spent).</summary>
+    static bool Capture(Record record, string dir, Camera camera, RenderTexture target, Texture2D readback)
     {
-        if (dir == null || camera == null || target == null || readback == null || record.framesCaptured >= MaxFrames) return;
+        if (dir == null || camera == null || target == null || readback == null || record.framesCaptured >= MaxFrames) return false;
         try
         {
             var previous = camera.targetTexture;
@@ -477,10 +484,12 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             camera.targetTexture = previous;
             File.WriteAllBytes(Path.Combine(dir, "frame_" + record.framesCaptured.ToString("D5") + ".png"), readback.EncodeToPNG());
             record.framesCaptured++;
+            return true;
         }
         catch (Exception e)
         {
             if (record.errors.Count < 20) record.errors.Add("[Capture] " + e.GetType().Name + ": " + e.Message);
+            return false;
         }
     }
 }

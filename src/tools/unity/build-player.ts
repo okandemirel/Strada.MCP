@@ -121,6 +121,18 @@ export function judgePlayerBuild(resultPath: string, exitCode: number, log: stri
       reasons.push('the report says built but names no output path');
     }
   }
+  // THE PROCESS HAS TO HAVE SUCCEEDED TOO. The exit code was consulted only
+  // when no result file existed, so a build whose report said "built" with a
+  // real artifact on disk came back ok:true while Unity had exited 42 — or
+  // been killed (Codex 2026-09-12 AA). A build nobody can vouch for is not a
+  // build.
+  if (exitCode !== 0) {
+    reasons.push(
+      exitCode === -1
+        ? 'Unity never exited normally — killed at its allowance, or it could not start'
+        : `Unity exited ${exitCode}`,
+    );
+  }
   return { ok: reasons.length === 0, reasons, result, artifact, measuredAt: new Date().toISOString() };
 }
 
