@@ -171,7 +171,25 @@ export class RunPlayerTool implements ITool {
     const timeoutMs = (boot + 15 + sessionsRequested * (deadline + 5)) * 1000 + 30_000;
     const exitCode = await runPlayerProcess(executable, args, timeoutMs);
     const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
-    const verdict = judgePlaythrough(captureDir, undefined, log);
+    const judged = judgePlaythrough(captureDir, undefined, log);
+    // A PLAYER THAT DIED IS NOT A PLAYER THAT PLAYED. The exit code was
+    // printed in the header and nowhere else: the verdict FILE — which is
+    // what Strada.Brain reads — stayed green on exit 42, and `isError` said
+    // nothing either (Codex 2026-09-12 Y). It goes into the verdict before
+    // the file is written, so every reader sees it.
+    const verdict =
+      exitCode === 0
+        ? judged
+        : {
+            ...judged,
+            ok: false,
+            reasons: [
+              ...judged.reasons,
+              exitCode === -1
+                ? `the player never exited normally — killed at its allowance (${Math.round(timeoutMs / 1000)} s), or it could not start`
+                : `the player exited ${exitCode}`,
+            ],
+          };
     try {
       writeFileSync(join(captureDir, PLAYTHROUGH_VERDICT_FILE), JSON.stringify(verdict, null, 2));
     } catch {

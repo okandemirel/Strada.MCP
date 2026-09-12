@@ -48,6 +48,39 @@ describe('where a run may write its recordings', () => {
       .toBe(real('Recordings', 'player-playthrough'));
   });
 
+  it('refuses a Recordings directory that is ITSELF a symlink elsewhere (Codex 2026-09-12 Y)', () => {
+    // The guard resolved its own authority through that link, so
+    // "/project/Recordings -> /victim" moved the permitted tree to /victim
+    // and `captureDir: "Recordings/assets"` was accepted and then removed
+    // recursively.
+    const root = mkdtempSync(join(tmpdir(), 'capture-dir-linked-'));
+    roots.push(root);
+    mkdirSync(join(root, 'Assets'), { recursive: true });
+    const victim = mkdtempSync(join(tmpdir(), 'victim-'));
+    roots.push(victim);
+    writeFileSync(join(victim, 'precious.txt'), 'do not delete me');
+    symlinkSync(victim, join(root, 'Recordings'));
+
+    const decision = resolveCaptureDir(root, 'Recordings/assets', 'Recordings/player-playthrough');
+    expect(decision.dir).toBeUndefined();
+    expect(decision.reason).toContain('nothing was written or removed');
+
+    // …and the same layout pointing back at the project itself.
+    const selfLinked = mkdtempSync(join(tmpdir(), 'capture-dir-self-'));
+    roots.push(selfLinked);
+    mkdirSync(join(selfLinked, 'Assets'), { recursive: true });
+    symlinkSync(selfLinked, join(selfLinked, 'Recordings'));
+    expect(resolveCaptureDir(selfLinked, 'Recordings/Assets', 'Recordings/player-playthrough').dir).toBeUndefined();
+  });
+
+  it('does not refuse an ordinary name that merely starts with dots', () => {
+    // `rel.startsWith("..")` also matches a filename, so "..valid" — a legal
+    // directory name — was refused (Codex 2026-09-12 Y).
+    const root = project();
+    expect(resolveCaptureDir(root, join('Recordings', '..valid'), 'Recordings/player-playthrough').dir)
+      .toBe(join(realpathSync(root), 'Recordings', '..valid'));
+  });
+
   it('refuses a symlink that leaves the recording root', () => {
     const root = project();
     const outside = mkdtempSync(join(tmpdir(), 'elsewhere-'));

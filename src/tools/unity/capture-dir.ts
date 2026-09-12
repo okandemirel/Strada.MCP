@@ -66,10 +66,23 @@ export function resolveCaptureDir(
   const target = asked === undefined
     ? join(projectPath, defaultSubdir)
     : isAbsolute(asked) ? asked : join(projectPath, asked);
-  const root = realTarget(join(projectPath, RECORDING_ROOT));
+  // THE AUTHORITY IS THE CANONICAL PROJECT, and `Recordings` under it — NOT
+  // wherever a `Recordings` symlink happens to point. Resolving the root
+  // through its own links moved the permitted tree with them: with
+  // `/project/Recordings -> /victim`, `captureDir: "Recordings/assets"` was
+  // accepted as /victim/assets and recursively removed (Codex 2026-09-12 Y).
+  // Fail closed when the project root cannot be canonicalized at all.
+  let project: string;
+  try {
+    project = realpathSync(resolve(projectPath));
+  } catch {
+    return { reason: `the project path ${projectPath} could not be resolved; nothing was written or removed` };
+  }
+  const root = join(project, RECORDING_ROOT);
   const real = realTarget(target);
   const rel = relative(root, real);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.split(sep).includes('..')) {
+  const parts = rel === '' ? [] : rel.split(sep);
+  if (rel === '' || isAbsolute(rel) || parts.includes('..')) {
     return {
       reason:
         `captureDir must name a directory under ${RECORDING_ROOT}/ inside the project ` +

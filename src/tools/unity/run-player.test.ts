@@ -103,3 +103,28 @@ describe('unity_run_player', () => {
     expect(apk.content).toContain('not a player this machine can run');
   });
 });
+
+/**
+ * A player that died is not a player that played. The exit code was printed
+ * in the header and nowhere else: the verdict FILE — what Strada.Brain reads
+ * — stayed green on exit 42 (Codex 2026-09-12 Y).
+ */
+describe('a failing exit invalidates the verdict', () => {
+  it('reaches the verdict the Brain reads, not only the text the model sees', async () => {
+    const exe = fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    // The same fake player, with a failing exit after it has written
+    // everything a good run writes.
+    writeFileSync(exe, readFileSync(exe, 'utf8').replace('exit 0', 'exit 42'));
+    chmodSync(exe, 0o755);
+
+    const result = await new RunPlayerTool().execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+
+    expect(result.content).toContain('exit 42');
+    expect(result.isError).toBe(true);
+    const written = JSON.parse(
+      readFileSync(join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'), 'utf8'),
+    ) as { ok: boolean; reasons: string[] };
+    expect(written.ok).toBe(false);
+    expect(written.reasons.join(' ')).toContain('the player exited 42');
+  });
+});
