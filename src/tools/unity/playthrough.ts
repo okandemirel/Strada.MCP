@@ -33,6 +33,8 @@ import {
   emitPlaythroughTest, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
 export const PLAYTHROUGH_VERDICT_FILE = 'playthrough-verdict.json';
+import { resolveCaptureDir } from './capture-dir.js';
+
 export const DEFAULT_CAPTURE_SUBDIR = 'Recordings/playthrough';
 /** Below this share of moved samples between the most different pair of frames, nothing on screen responded to play. */
 export const MIN_MOTION_SHARE = 0.01;
@@ -179,7 +181,10 @@ export function entrySceneFromBuildSettings(projectPath: string): string | null 
     const entries = text.split(/\n\s*- /).slice(1);
     for (const entry of entries) {
       if (!/enabled:\s*1/.test(entry)) continue;
-      const path = /path:\s*(\S+)/.exec(entry)?.[1];
+      // THE WHOLE PATH LINE. `\S+` stopped at the first space, so
+      // "Assets/Scenes/Main Menu.unity" loaded as "Main" — a scene that does
+      // not exist (Codex 2026-09-12 X). Internal spaces are part of the name.
+      const path = /path:[ \t]*([^\r\n]+)/.exec(entry)?.[1]?.trim();
       if (!path) continue;
       const file = path.split('/').pop() ?? path;
       return file.replace(/\.unity$/, '');
@@ -278,6 +283,17 @@ export function judgePlaythrough(
   }
   if (test !== undefined && test.total === 0) {
     reasons.push('the test runner executed zero tests — the play-through test did not compile or was filtered out');
+  } else if (test !== undefined) {
+    // A FAILED RUN IS NOT A PASS. Only "zero tests" was refused, so
+    // {total:1, passed:0, failed:1, result:"Failed"} with good frames and a
+    // good record came back ok:true (Codex 2026-09-12 U#F4, X). The runner's
+    // own verdict and its counts both have to say it passed.
+    if (test.failed > 0) reasons.push(`${test.failed} of ${test.total} play-through test(s) FAILED`);
+    else if (!/^(?:passed|success(?:ful)?|succeeded|ok)$/i.test(test.result.trim())) {
+      reasons.push(`the test runner's own verdict is "${test.result}" — ${test.passed} of ${test.total} passed`);
+    } else if (test.passed <= 0) {
+      reasons.push(`${test.total} play-through test(s) collected and none ran to a pass`);
+    }
   }
 
   return {
@@ -470,8 +486,12 @@ export class PlaythroughTool implements ITool {
     const emission = emitPlaythroughTest(projectPath, scene);
     if (!emission.written) return { content: `Error: ${emission.reason ?? 'the play-through test could not be written'}`, isError: true };
 
-    const requestedDir = String(input['captureDir'] ?? DEFAULT_CAPTURE_SUBDIR);
-    const captureDir = requestedDir.startsWith('/') ? requestedDir : join(projectPath, requestedDir);
+    // THE RECORDER OWNS ITS DIRECTORY (Codex 2026-09-12 U#F7, X): the old
+    // line took whatever the caller named and the next statement deleted it
+    // recursively, so `captureDir: "."` deleted the project.
+    const decision = resolveCaptureDir(projectPath, input['captureDir'], DEFAULT_CAPTURE_SUBDIR);
+    if (decision.dir === undefined) return { content: `Error: ${decision.reason}`, isError: true };
+    const captureDir = decision.dir;
     try {
       rmSync(captureDir, { recursive: true, force: true });
       mkdirSync(captureDir, { recursive: true });

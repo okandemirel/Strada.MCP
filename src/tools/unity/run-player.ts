@@ -22,6 +22,8 @@ import { PLAYTHROUGH_RECORD_FILE, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN
  * Runnable artifacts only: a macOS .app, a Windows .exe, a Linux executable.
  * An .apk or a WebGL folder cannot be run here and is said so.
  */
+import { resolveCaptureDir } from './capture-dir.js';
+
 export const PLAYER_CAPTURE_SUBDIR = join('Recordings', 'player-playthrough');
 
 const RUNNABLE_EXT_RE = /\.(app|exe|x86_64|x86)$/i;
@@ -142,10 +144,12 @@ export class RunPlayerTool implements ITool {
     if (!executable) {
       return { content: `Error: ${artifact} is not a player this machine can run (an .apk, WebGL folder or missing executable) — nothing was played.`, isError: true };
     }
-    const captureDir =
-      typeof input['captureDir'] === 'string' && input['captureDir'].trim() !== ''
-        ? isAbsolute(input['captureDir']) ? input['captureDir'] : join(projectPath, input['captureDir'])
-        : join(projectPath, PLAYER_CAPTURE_SUBDIR);
+    // THE RECORDER OWNS ITS DIRECTORY. This took the caller's path and began
+    // by clearing it, so `captureDir: "."` resolved to the project root and
+    // deleted the game (Codex 2026-09-12 U#F7, X).
+    const decision = resolveCaptureDir(projectPath, input['captureDir'], PLAYER_CAPTURE_SUBDIR);
+    if (decision.dir === undefined) return { content: `Error: ${decision.reason}`, isError: true };
+    const captureDir = decision.dir;
     rmSync(captureDir, { recursive: true, force: true });
     mkdirSync(captureDir, { recursive: true });
     const jsonPath = join(captureDir, PLAYTHROUGH_RECORD_FILE);

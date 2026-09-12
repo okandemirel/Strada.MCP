@@ -278,3 +278,45 @@ describe("the verdict carries the failure lines of Unity's own log (measured 202
   });
 });
 
+
+/**
+ * Codex ran these against this judge (2026-09-12 U#F4, X): with good frames
+ * and a good record, a FAILED NUnit run came back ok:true — only "zero
+ * tests" was refused. And an entry scene whose name holds a space loaded as
+ * its first word, which is a scene that does not exist.
+ */
+describe('the runner’s own result decides, and a scene name keeps its spaces', () => {
+  it('refuses a failed, inconclusive or nothing-passed test run', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify(goodRecord));
+    frames(drawn(0), drawn(40), drawn(90));
+
+    const failed = judgePlaythrough(dir, { total: 1, passed: 0, failed: 1, result: 'Failed' });
+    expect(failed.ok).toBe(false);
+    expect(failed.reasons.join(' ')).toContain('1 of 1 play-through test(s) FAILED');
+
+    // Counters clean, verdict not a pass.
+    const inconclusive = judgePlaythrough(dir, { total: 1, passed: 1, failed: 0, result: 'Inconclusive' });
+    expect(inconclusive.ok).toBe(false);
+    expect(inconclusive.reasons.join(' ')).toContain('own verdict is "Inconclusive"');
+
+    // Nothing ran to a pass, nothing failed either.
+    const none = judgePlaythrough(dir, { total: 4, passed: 0, failed: 0, result: 'Passed' });
+    expect(none.ok).toBe(false);
+    expect(none.reasons.join(' ')).toContain('none ran to a pass');
+
+    // …and a real pass is still a pass, with or without a test run at all.
+    expect(judgePlaythrough(dir, { total: 2, passed: 2, failed: 0, result: 'Passed' }).ok).toBe(true);
+    expect(judgePlaythrough(dir).ok).toBe(true);
+  });
+
+  it('reads an entry scene whose name contains a space', () => {
+    const project = mkdtempSync(join(tmpdir(), 'entry-scene-'));
+    mkdirSync(join(project, 'ProjectSettings'), { recursive: true });
+    writeFileSync(
+      join(project, 'ProjectSettings', 'EditorBuildSettings.asset'),
+      'EditorBuildSettings:\n  m_Scenes:\n  - enabled: 1\n    path: Assets/Scenes/Main Menu.unity\n    guid: ' + 'a'.repeat(32) + '\n',
+    );
+    expect(entrySceneFromBuildSettings(project)).toBe('Main Menu');
+    rmSync(project, { recursive: true, force: true });
+  });
+});
