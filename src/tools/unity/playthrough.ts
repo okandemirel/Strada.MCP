@@ -331,6 +331,37 @@ export function judgePlaythrough(
 /** The optional contract that names which session is in progress. */
 export const PLAYTHROUGH_ACTIVE_SESSION_TYPE = 'Strada.Core.Play.IActiveSession';
 
+/**
+ * The verdict, with HOW THE PROCESS ENDED folded in.
+ *
+ * The exit code was printed in the header and nowhere else, so with good
+ * frames and a good record an editor that exited 42 — or one that produced no
+ * NUnit results at all — printed "PLAY-THROUGH OK" and left the verdict FILE
+ * green, and that file is what Strada.Brain reads for its delivery proof
+ * (Codex 2026-09-12 Y#J4.5 for the player, Z for the editor).
+ */
+export function withProcessOutcome<T extends { ok: boolean; reasons: string[] }>(
+  judged: T,
+  exitCode: number,
+  hasTestResults: boolean,
+  medium: 'editor' | 'player',
+): T {
+  const reasons: string[] = [];
+  if (exitCode !== 0) {
+    reasons.push(
+      exitCode === -1
+        ? `the ${medium} never exited normally — killed at its allowance, or it could not start`
+        : `the ${medium} exited ${exitCode}`,
+    );
+  }
+  // An editor run IS an NUnit test run: no results file means nothing was
+  // judged by the runner, whatever the frames show. The built player has no
+  // NUnit results by design, so this only applies to the editor.
+  if (medium === 'editor' && !hasTestResults) reasons.push('the play-through test produced no NUnit results file');
+  if (reasons.length === 0) return judged;
+  return { ...judged, ok: false, reasons: [...judged.reasons, ...reasons] };
+}
+
 export function renderSessions(r: PlaythroughRecord): string {
   const catalog =
     typeof r.sessionCount === 'number' && r.sessionCount >= 0
@@ -539,7 +570,12 @@ export class PlaythroughTool implements ITool {
       const exitCode = await runUnityProcess(editor.binary, args, 580_000, env);
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const outcome = existsSync(resultsPath) ? parseTestRun(readFileSync(resultsPath, 'utf8')) : null;
-      const verdict = judgePlaythrough(captureDir, outcome ?? undefined, log);
+      const verdict = withProcessOutcome(
+        judgePlaythrough(captureDir, outcome ?? undefined, log),
+        exitCode,
+        outcome !== null,
+        'editor',
+      );
       try {
         writeFileSync(join(captureDir, PLAYTHROUGH_VERDICT_FILE), JSON.stringify(verdict, null, 2));
       } catch {

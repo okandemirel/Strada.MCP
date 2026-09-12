@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { isAbsolute, join, basename } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { resolveProjectPath } from './project-path.js';
-import { judgePlaythrough, renderVerdict, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
+import { judgePlaythrough, renderVerdict, withProcessOutcome, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
 import { PLAYTHROUGH_RECORD_FILE, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
 /**
@@ -177,19 +177,7 @@ export class RunPlayerTool implements ITool {
     // what Strada.Brain reads — stayed green on exit 42, and `isError` said
     // nothing either (Codex 2026-09-12 Y). It goes into the verdict before
     // the file is written, so every reader sees it.
-    const verdict =
-      exitCode === 0
-        ? judged
-        : {
-            ...judged,
-            ok: false,
-            reasons: [
-              ...judged.reasons,
-              exitCode === -1
-                ? `the player never exited normally — killed at its allowance (${Math.round(timeoutMs / 1000)} s), or it could not start`
-                : `the player exited ${exitCode}`,
-            ],
-          };
+    const verdict = withProcessOutcome(judged, exitCode, true, 'player');
     try {
       writeFileSync(join(captureDir, PLAYTHROUGH_VERDICT_FILE), JSON.stringify(verdict, null, 2));
     } catch {

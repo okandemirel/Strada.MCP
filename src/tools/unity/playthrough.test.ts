@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { perfFromRecord, renderSessions, renderRuntime, judgePlaythrough, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
+import { perfFromRecord, renderSessions, renderRuntime, judgePlaythrough, withProcessOutcome, entrySceneFromBuildSettings, renderVerdict, MIN_MOTION_SHARE, unityLogFailureLines } from './playthrough.js';
 import { buildPlaythroughTest, emitPlaythroughTest, PLAYTHROUGH_ASSEMBLY, PLAYTHROUGH_DRIVER_TYPE } from './playthrough-test.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 
@@ -376,5 +376,44 @@ describe('an adopted session whose content nobody could identify', () => {
       expect(source, needle).toContain(needle);
     // Nothing claims verification before the session is under way.
     expect(source).not.toContain('s.identityVerified = true;');
+  });
+});
+
+/**
+ * How the PROCESS ended belongs in the verdict, not only in the header. With
+ * good frames and a good record, an editor that exited 42 — or produced no
+ * NUnit results at all — printed "PLAY-THROUGH OK" and left the verdict FILE
+ * green, and that file is what Strada.Brain reads (Codex 2026-09-12 Y#J4.5,
+ * Z).
+ */
+describe('the verdict carries how the process ended', () => {
+  const green = { ok: true, reasons: [] as string[] };
+
+  it('an editor run needs exit 0 AND an NUnit result', () => {
+    expect(withProcessOutcome(green, 0, true, 'editor')).toEqual(green);
+    const failed = withProcessOutcome(green, 42, true, 'editor');
+    expect(failed.ok).toBe(false);
+    expect(failed.reasons.join(' ')).toContain('the editor exited 42');
+    const killed = withProcessOutcome(green, -1, true, 'editor');
+    expect(killed.reasons.join(' ')).toContain('never exited normally');
+    const noResults = withProcessOutcome(green, 0, false, 'editor');
+    expect(noResults.ok).toBe(false);
+    expect(noResults.reasons.join(' ')).toContain('no NUnit results file');
+  });
+
+  it('a built player has no NUnit results by design, so only its exit counts', () => {
+    expect(withProcessOutcome(green, 0, false, 'player')).toEqual(green);
+    const dead = withProcessOutcome(green, 139, false, 'player');
+    expect(dead.ok).toBe(false);
+    expect(dead.reasons.join(' ')).toContain('the player exited 139');
+  });
+
+  it('keeps the reasons the judge already found', () => {
+    const judged = { ok: false, reasons: ['no frames were captured (no camera, or no capture directory)'] };
+    const both = withProcessOutcome(judged, 42, true, 'editor');
+    expect(both.reasons).toEqual([
+      'no frames were captured (no camera, or no capture directory)',
+      'the editor exited 42',
+    ]);
   });
 });
