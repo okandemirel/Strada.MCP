@@ -20,6 +20,11 @@ export class PrefabCreateTool extends BridgeTool {
 
   override get metadata(): ToolMetadata {
     return {
+      // THE BASE'S REQUIREMENTS SURVIVE THE OVERRIDE. Dropping them let a
+      // tool be offered while the connected editor implements no handler
+      // for its RPC method, so the call was accepted and then refused at
+      // dispatch (Codex 2026-09-13 AG#9).
+      ...super.metadata,
       category: 'unity-scene',
       requiresBridge: true,
       dangerous: this.dangerousTool,
