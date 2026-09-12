@@ -153,6 +153,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         public bool reachedOutcome;
         public float seconds;
         public string lastPhase = "";
+        public int requestedIndex;
+        public bool identityVerified;
+        public int observedIndex;
     }
 
     /// <summary>"1-3", "2,5", "all" (bounded by the catalog and MAX_SESSIONS_PER_RUN) or a single index; nothing → the default index.</summary>
@@ -317,13 +320,33 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             var wallPlaySeconds = 0f;
             for (var si = 0; si < indices.Count; si++)
             {
-                var s = new SessionRecord { index = indices[si] };
+                var s = new SessionRecord { index = indices[si], requestedIndex = indices[si] };
                 record.sessions.Add(s);
                 if (si == 0 && record.autoStarted)
+                {
+                    // WHICH session the game already started, only the game can
+                    // say: this recorded the index we ASKED for, so an
+                    // auto-started level 1 certified level 7 (Codex 2026-09-12
+                    // X). Strada.Core.Play.IActiveSession answers it when the
+                    // game registers one; without it the session is recorded
+                    // as identity-unverified and certifies no content.
                     s.startAccepted = true;
+                    IActiveSession active = null;
+                    try { GameBootstrapper.Services.TryGet(out active); } catch { active = null; }
+                    var observed = 0;
+                    if (active != null)
+                    {
+                        try { observed = active.ActiveSession; }
+                        catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[ActiveSession] " + e.GetType().Name + ": " + e.Message); }
+                    }
+                    s.observedIndex = observed;
+                    s.identityVerified = observed == s.requestedIndex;
+                    if (observed > 0) s.index = observed;
+                }
                 else
                 {
                     if (si > 0) for (var settle = 0; settle < 5; settle++) yield return null;
+                    s.identityVerified = true;
                     try { s.startAccepted = driver.StartSession(s.index); }
                     catch (Exception e)
                     {

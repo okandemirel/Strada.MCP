@@ -97,6 +97,18 @@ export interface SessionRecord {
   reachedOutcome: boolean;
   seconds: number;
   lastPhase?: string;
+  /** The index the run ASKED for; absent on records from older runners. */
+  requestedIndex?: number;
+  /**
+   * Whether this session IS the content the run asked for. A game may start
+   * playing by itself after boot; the run then adopts that session, and only
+   * the game can say which one it is (Strada.Core.Play.IActiveSession). False
+   * means the outcome certifies no particular content — an auto-started level
+   * 1 used to certify level 7 (Codex 2026-09-12 X). Absent on older records.
+   */
+  identityVerified?: boolean;
+  /** The index the game reported as active, when it can report one. */
+  observedIndex?: number;
 }
 
 /**
@@ -316,6 +328,9 @@ export function judgePlaythrough(
 }
 
 /** The catalog and every session played: what a level count and "each level can be finished" rest on. */
+/** The optional contract that names which session is in progress. */
+export const PLAYTHROUGH_ACTIVE_SESSION_TYPE = 'Strada.Core.Play.IActiveSession';
+
 export function renderSessions(r: PlaythroughRecord): string {
   const catalog =
     typeof r.sessionCount === 'number' && r.sessionCount >= 0
@@ -323,11 +338,17 @@ export function renderSessions(r: PlaythroughRecord): string {
       : `no session catalog registered (${PLAYTHROUGH_CATALOG_TYPE}) — the level count cannot be measured`;
   const played = r.sessions && r.sessions.length > 0 ? r.sessions : null;
   if (!played) return `Sessions: ${catalog}.`;
-  const parts = played.map((s) =>
-    !s.startAccepted
-      ? `#${s.index} refused`
-      : `#${s.index} ${s.reachedOutcome ? s.outcome : 'never ended'} in ${s.actions} actions (${s.seconds.toFixed(1)} s)`,
-  );
+  const parts = played.map((s) => {
+    // A session the run ADOPTED and could not identify says so: its outcome
+    // belongs to whatever the game was already playing (Codex 2026-09-12 X).
+    const identity =
+      s.identityVerified === false
+        ? ` — CONTENT UNVERIFIED (asked for #${s.requestedIndex ?? s.index}; the game was already playing and registers no ${PLAYTHROUGH_ACTIVE_SESSION_TYPE})`
+        : '';
+    return !s.startAccepted
+      ? `#${s.index} refused${identity}`
+      : `#${s.index} ${s.reachedOutcome ? s.outcome : 'never ended'} in ${s.actions} actions (${s.seconds.toFixed(1)} s)${identity}`;
+  });
   return `Sessions: ${catalog}; played ${played.length}: ${parts.join(', ')}.`;
 }
 

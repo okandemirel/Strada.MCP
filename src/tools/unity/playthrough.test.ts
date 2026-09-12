@@ -320,3 +320,54 @@ describe('the runner’s own result decides, and a scene name keeps its spaces',
     rmSync(project, { recursive: true, force: true });
   });
 });
+
+/**
+ * A game may start playing BY ITSELF after boot, and the run then adopts that
+ * session instead of starting one. The record carried the index the run had
+ * ASKED for, so an auto-started level 1 certified level 7 (Codex 2026-09-12
+ * X). Which session it is, only the game can say — Strada.Core.Play
+ * .IActiveSession — and what it could not identify is said out loud.
+ */
+describe('an adopted session whose content nobody could identify', () => {
+  it('says CONTENT UNVERIFIED beside it, and says nothing when the identity holds', () => {
+    const unidentified = renderSessions({
+      ...goodRecord,
+      sessionCount: 12,
+      sessions: [
+        { index: 1, requestedIndex: 7, identityVerified: false, startAccepted: true, phasesSeen: ['Playing'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 12 },
+      ],
+    } as never);
+    expect(unidentified).toContain('CONTENT UNVERIFIED');
+    expect(unidentified).toContain('asked for #7');
+    expect(unidentified).toContain('Strada.Core.Play.IActiveSession');
+
+    const identified = renderSessions({
+      ...goodRecord,
+      sessionCount: 12,
+      sessions: [
+        { index: 7, requestedIndex: 7, identityVerified: true, startAccepted: true, phasesSeen: ['Playing'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 12 },
+      ],
+    } as never);
+    expect(identified).not.toContain('UNVERIFIED');
+    // …and a record from a producer that says nothing about identity reads as before.
+    const older = renderSessions({
+      ...goodRecord,
+      sessionCount: 12,
+      sessions: [{ index: 7, startAccepted: true, phasesSeen: ['Playing'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 12 }],
+    } as never);
+    expect(older).not.toContain('UNVERIFIED');
+    expect(older).toContain('#7 Won in 9 actions');
+  });
+
+  it('the generated editor test resolves the identity contract and records what it found', () => {
+    const { source } = buildPlaythroughTest('Entry');
+    for (const needle of [
+      'IActiveSession active = null',
+      'GameBootstrapper.Services.TryGet(out active)',
+      's.identityVerified = observed == s.requestedIndex',
+      'public int requestedIndex;',
+      'public int observedIndex;',
+    ])
+      expect(source, needle).toContain(needle);
+  });
+});
