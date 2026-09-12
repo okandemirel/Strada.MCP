@@ -259,11 +259,25 @@ export function judgePlaythrough(
     );
   }
 
+  // A CAPTURE NAMES THE SESSION IT BELONGS TO, when the producer says so:
+  // `frame_s02_00013.png`. One shared frame budget used to be spent on the
+  // first session, so later levels rendered nothing anybody could see and the
+  // run passed on the earlier images (Codex 2026-09-13 AG#6).
   const frameFiles = existsSync(captureDir)
     ? readdirSync(captureDir)
-        .filter((f) => /^frame_\d+\.png$/.test(f))
+        .filter((f) => /^frame_(?:s\d+_)?\d+\.png$/.test(f))
         .sort()
     : [];
+  const sessionOfFrame = (file: string): number | undefined => {
+    const at = /^frame_s(\d+)_/.exec(file);
+    return at ? Number(at[1]) : undefined;
+  };
+  const framesPerSession = new Map<number, string[]>();
+  for (const file of frameFiles) {
+    const index = sessionOfFrame(file);
+    if (index === undefined) continue;
+    framesPerSession.set(index, [...(framesPerSession.get(index) ?? []), file]);
+  }
   let unreadable = 0;
   let flat = 0;
   let maxMotion = 0;
@@ -313,6 +327,18 @@ export function judgePlaythrough(
     }
     if (record.errors.length > 0) {
       reasons.push(`${record.errors.length} error(s) logged during play, first: ${record.errors[0]}`);
+    }
+  }
+  // EVERY SESSION THAT PLAYED MUST HAVE BEEN SEEN. Judged only where the
+  // producer names its captures — an older runner's frames carry no session,
+  // and are read exactly as before (AG#6).
+  if (record !== null && framesPerSession.size > 0) {
+    const played = (record.sessions ?? []).filter((s) => s.startAccepted);
+    const unseen = played.filter((s) => (framesPerSession.get(s.index) ?? []).length === 0).map((s) => s.index);
+    if (unseen.length > 0) {
+      reasons.push(
+        `session(s) ${unseen.join(', ')} played with no frame captured of them — nothing here shows what they rendered`,
+      );
     }
   }
   if (frameFiles.length === 0) reasons.push('no frames were captured (no camera, or no capture directory)');

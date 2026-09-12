@@ -38,6 +38,67 @@ const drawn =
   (x: number, y: number): [number, number, number] => [((x + seed) * 7) & 255, (y * 11) & 255, ((x ^ y) * 3) & 255];
 const flat = (): [number, number, number] => [20, 20, 20];
 
+/**
+ * Codex round AG#6, reproduced: three sessions played, one shared budget of
+ * frames spent on the first, and the run passed on the earlier images while
+ * levels 2 and 3 rendered nothing anybody could see.
+ */
+describe('every session that played must have been seen (Codex 2026-09-13 AG#6)', () => {
+  const sessionFrames = (index: number, ...pixels: Array<(x: number, y: number) => [number, number, number]>): void => {
+    pixels.forEach((p, i) =>
+      writeFileSync(
+        join(dir, `frame_s${String(index).padStart(2, '0')}_${String(index * 100 + i).padStart(5, '0')}.png`),
+        encodeRgbPng(160, 90, p),
+      ),
+    );
+  };
+  const threeSessions = [
+    { index: 1, startAccepted: true, phasesSeen: ['Playing', 'Won'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 15, lastPhase: 'Won' },
+    { index: 2, startAccepted: true, phasesSeen: ['Playing', 'Won'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 15, lastPhase: 'Won' },
+    { index: 3, startAccepted: true, phasesSeen: ['Playing', 'Won'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 15, lastPhase: 'Won' },
+  ];
+
+  it('refuses a run whose later sessions left no frame of their own', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, sessionCount: 3, sessions: threeSessions }));
+    sessionFrames(1, drawn(0), drawn(40));
+    const v = judgePlaythrough(dir);
+    expect(v.ok).toBe(false);
+    expect(v.reasons.join('\n')).toMatch(/session\(s\) 2, 3 played with no frame captured of them/);
+  });
+
+  it('asks for frames only of the sessions that STARTED', () => {
+    // A session the driver refused is already a refusal of its own; it must
+    // not also be asked for a picture of what it never played.
+    const refusedThird = [
+      threeSessions[0]!,
+      threeSessions[1]!,
+      { ...threeSessions[2]!, startAccepted: false, actions: 0, outcome: 'None', reachedOutcome: false, phasesSeen: [] },
+    ];
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, sessionCount: 3, sessions: refusedThird }));
+    sessionFrames(1, drawn(0), drawn(40));
+    sessionFrames(2, drawn(5), drawn(60));
+    const v = judgePlaythrough(dir);
+    expect(v.reasons.join('\n')).toContain('the driver refused to start session 3');
+    expect(v.reasons.join('\n')).not.toMatch(/no frame captured/);
+  });
+
+  it('accepts a run that shows every session it played', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, sessionCount: 3, sessions: threeSessions }));
+    sessionFrames(1, drawn(0), drawn(40));
+    sessionFrames(2, drawn(5), drawn(60));
+    sessionFrames(3, drawn(9), drawn(80));
+    const v = judgePlaythrough(dir);
+    expect(v.ok).toBe(true);
+    expect(v.reasons).toEqual([]);
+  });
+
+  it('reads an older runner\'s unnamed frames exactly as before', () => {
+    writeFileSync(join(dir, 'playthrough.json'), JSON.stringify({ ...goodRecord, sessionCount: 3, sessions: threeSessions }));
+    frames(drawn(0), drawn(40));
+    expect(judgePlaythrough(dir).ok).toBe(true);
+  });
+});
+
 describe('the play-through verdict is derived from the record, the pixels and the runner', () => {
   it('ok when the session ended, frames are drawn and something moved', () => {
     writeFileSync(join(dir, 'playthrough.json'), JSON.stringify(goodRecord));

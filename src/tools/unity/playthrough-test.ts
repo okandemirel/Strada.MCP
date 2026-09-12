@@ -201,6 +201,13 @@ public class ${PLAYTHROUGH_TEST_CLASS}
     const int Height = 720;
     const int MaxFrames = 40;
     const int FramesBetweenCaptures = 15;
+    // EACH SESSION KEEPS ITS OWN BUDGET, and a capture names the session it
+    // belongs to: one shared budget was spent on the first session, so later
+    // levels rendered nothing anybody could see and the run still passed on
+    // the earlier images (Codex 2026-09-13 AG#6).
+    const int MaxFramesPerSession = 12;
+    static int capturingSession;
+    static int sessionFrames;
 
     static string Env(string name, string fallback)
     {
@@ -325,6 +332,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             {
                 var s = new SessionRecord { index = indices[si], requestedIndex = indices[si] };
                 record.sessions.Add(s);
+                // THIS session's own capture budget and name (AG#6).
+                capturingSession = s.index;
+                sessionFrames = 0;
                 if (si == 0 && record.autoStarted)
                 {
                     // WHICH session the game already started, only the game can
@@ -435,6 +445,10 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 s.lastPhase = last;
                 if (!s.reachedOutcome) s.outcome = "None";
                 if (si == 0) Mirror(record, s);
+                // AN END-OF-SESSION FRAME, always: a session whose budget was
+                // spent mid-play still shows how it ENDED (AG#6).
+                sessionFrames = 0;
+                Capture(record, captureDir, camera, target, readback);
                 if (!s.reachedOutcome) break;
             }
             if (record.playFrames == 0) record.playSeconds = wallPlaySeconds;
@@ -479,6 +493,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
     static bool Capture(Record record, string dir, Camera camera, RenderTexture target, Texture2D readback)
     {
         if (dir == null || camera == null || target == null || readback == null || record.framesCaptured >= MaxFrames) return false;
+        if (capturingSession > 0 && sessionFrames >= MaxFramesPerSession) return false;
         try
         {
             var previous = camera.targetTexture;
@@ -489,8 +504,12 @@ public class ${PLAYTHROUGH_TEST_CLASS}
             readback.Apply();
             RenderTexture.active = null;
             camera.targetTexture = previous;
-            File.WriteAllBytes(Path.Combine(dir, "frame_" + record.framesCaptured.ToString("D5") + ".png"), readback.EncodeToPNG());
+            var name = capturingSession > 0
+                ? "frame_s" + capturingSession.ToString("D2") + "_" + record.framesCaptured.ToString("D5") + ".png"
+                : "frame_" + record.framesCaptured.ToString("D5") + ".png";
+            File.WriteAllBytes(Path.Combine(dir, name), readback.EncodeToPNG());
             record.framesCaptured++;
+            sessionFrames++;
             return true;
         }
         catch (Exception e)
