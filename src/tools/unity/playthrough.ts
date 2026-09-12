@@ -107,6 +107,15 @@ export interface SessionRecord {
    * 1 used to certify level 7 (Codex 2026-09-12 X). Absent on older records.
    */
   identityVerified?: boolean;
+  /**
+   * WHERE that identity came from: 'active-session' (the game's own
+   * IActiveSession named this session), 'start-acceptance' (the driver
+   * accepted the request and the game registers no identity service, so
+   * nothing contradicted it) or 'unverified'. The flag alone could not tell a
+   * game that CONFIRMED the content from one that merely did not deny it
+   * (Codex 2026-09-12 AC J1). Absent on older records.
+   */
+  identitySource?: 'active-session' | 'start-acceptance' | 'unverified';
   /** The index the game reported as active, when it can report one. */
   observedIndex?: number;
 }
@@ -375,6 +384,11 @@ export function renderSessions(r: PlaythroughRecord): string {
     const identity =
       s.identityVerified === false
         ? ` — CONTENT UNVERIFIED (asked for #${s.requestedIndex ?? s.index}; the game was already playing and registers no ${PLAYTHROUGH_ACTIVE_SESSION_TYPE})`
+        // WHOSE WORD THE IDENTITY IS. "Verified" on the driver's own
+        // acceptance is a weaker claim than the game naming the session, and
+        // the report showed them identically (Codex 2026-09-12 AC J1).
+        : s.identitySource === 'start-acceptance'
+        ? ` — identity on the driver's acceptance alone (no ${PLAYTHROUGH_ACTIVE_SESSION_TYPE} registered)`
         : '';
     return !s.startAccepted
       ? `#${s.index} refused${identity}`

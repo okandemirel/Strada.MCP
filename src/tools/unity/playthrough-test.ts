@@ -155,6 +155,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         public string lastPhase = "";
         public int requestedIndex;
         public bool identityVerified;
+        // WHERE the identity came from: "active-session", "start-acceptance"
+        // or "unverified" (Codex 2026-09-12 AC J1).
+        public string identitySource = "unverified";
         public int observedIndex;
     }
 
@@ -346,6 +349,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     // 2026-09-12 AA#3). Only a game that registers no identity
                     // service keeps the benefit of the doubt.
                     s.identityVerified = observed == s.requestedIndex;
+                    s.identitySource = s.identityVerified ? "active-session" : "unverified";
                     if (observed > 0) s.index = observed;
                 }
                 else
@@ -381,6 +385,9 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     // game had not started (Codex 2026-09-12 AA#3). Only a
                     // game with no identity service keeps its own acceptance.
                     s.identityVerified = activeNow == null || running == s.requestedIndex;
+                    s.identitySource = activeNow == null
+                        ? "start-acceptance"
+                        : (s.identityVerified ? "active-session" : "unverified");
                     if (running > 0) s.index = running;
                 }
 
