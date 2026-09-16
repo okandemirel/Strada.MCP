@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 export const EVIDENCE_FENCE = 'strada-evidence';
 
@@ -22,7 +22,7 @@ export const EVIDENCE_FENCE = 'strada-evidence';
  * Strada.Brain uses. A record written under the old path-and-size scheme must
  * never look like one written under this one (Codex 2026-09-13 AH#8).
  */
-export const ARTIFACT_DIGEST_VERSION = 'strada-artifact-v2-content';
+export const ARTIFACT_DIGEST_VERSION = 'strada-artifact-v3-layout';
 
 export interface ReceiptExecution {
   readonly completed: boolean;
@@ -130,8 +130,11 @@ export function artifactDigest(path: string | undefined): string | undefined {
     const hash = createHash('sha256');
     // THE BYTES, not the names and sizes: two different files of the same
     // size hashed identically (Codex 2026-09-13 AH#8). The scheme is named in
-    // the digest so an old size-based record cannot pass as a content one.
+    // the digest so an old record cannot pass as one written under this one.
     hash.update(`${ARTIFACT_DIGEST_VERSION}\n`);
+    // WHICH artifact in that layout, so two executables shipped side by side
+    // are not one artifact.
+    hash.update(`${basename(path)}\n`);
     const walk = (at: string, rel: string): void => {
       const st = statSync(at);
       if (st.isDirectory()) {
@@ -141,10 +144,33 @@ export function artifactDigest(path: string | undefined): string | undefined {
       hash.update(`${rel}:${st.size}\n`);
       hash.update(readFileSync(at));
     };
-    walk(path, '');
+    walk(playerLayoutRoot(path), '');
     return hash.digest('hex');
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * The directory a Unity player's parts live in, or the path itself.
+ *
+ * A Windows or Linux player is an executable PLUS its `<Name>_Data` folder,
+ * its runtime library and its plugins; hashing only the named file left every
+ * asset, scene and managed assembly out of the artifact's identity — the whole
+ * game could be replaced while the digest stood (Codex 2026-09-13 AI#9). Only
+ * a layout this process can RECOGNISE is adopted: the file's own directory
+ * must hold a `*_Data` folder, which is what Unity writes beside a player.
+ * Hashing any parent directory would pull unrelated builds and mutable output
+ * into the identity.
+ */
+export function playerLayoutRoot(path: string): string {
+  try {
+    if (statSync(path).isDirectory()) return path;
+    const dir = dirname(path);
+    const hasData = readdirSync(dir).some((entry) => entry.endsWith('_Data') && statSync(join(dir, entry)).isDirectory());
+    return hasData ? dir : path;
+  } catch {
+    return path;
   }
 }
 

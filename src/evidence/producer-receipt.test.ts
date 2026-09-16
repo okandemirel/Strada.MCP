@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { artifactDigest, evidenceRunId, projectRevision, renderReceipt, EVIDENCE_FENCE } from './producer-receipt.js';
+import { ARTIFACT_DIGEST_VERSION, artifactDigest, evidenceRunId, projectRevision, renderReceipt, EVIDENCE_FENCE } from './producer-receipt.js';
 
 describe('producer receipts', () => {
   let dir: string;
@@ -111,5 +111,49 @@ describe('projectRevision', () => {
     git('add', '-A');
     git('commit', '-qm', 'one');
     expect(projectRevision(dir)).toBe(git('rev-parse', 'HEAD').trim());
+  });
+});
+
+/**
+ * THE GAME BESIDE THE EXECUTABLE (Codex 2026-09-13 AI#9).
+ *
+ * A Windows or Linux player is an executable plus its `<Name>_Data` folder;
+ * hashing only the named file left every asset and managed assembly out of the
+ * artifact's identity. Strada.Brain computes the same digest for its ticket,
+ * so the two must move together.
+ */
+describe('artifactDigest over a player layout', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'layout-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const layout = (target: string, level: string): string => {
+    const build = join(dir, target);
+    mkdirSync(join(build, 'Game_Data'), { recursive: true });
+    writeFileSync(join(build, 'Game.x86_64'), 'the executable');
+    writeFileSync(join(build, 'Game_Data', 'level0'), level);
+    return join(build, 'Game.x86_64');
+  };
+
+  it('moves when the data folder changes, with the executable untouched', () => {
+    const exe = layout('linux', 'level one');
+    const before = artifactDigest(exe);
+    expect(before).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(join(dir, 'linux', 'Game_Data', 'level0'), 'level one, edited');
+    expect(artifactDigest(exe)).not.toBe(before);
+  });
+
+  it('adopts only a layout it can recognise, and names which artifact it is', () => {
+    const loose = join(dir, 'loose');
+    mkdirSync(loose, { recursive: true });
+    writeFileSync(join(loose, 'tool'), 'the executable');
+    const before = artifactDigest(join(loose, 'tool'));
+    writeFileSync(join(loose, 'notes.txt'), 'unrelated');
+    expect(artifactDigest(join(loose, 'tool'))).toBe(before);
+    expect(before).not.toBe(artifactDigest(layout('linux2', 'level one')));
+  });
+
+  it('names its scheme, so a digest written under an older one cannot pass as this', () => {
+    expect(ARTIFACT_DIGEST_VERSION).toBe('strada-artifact-v3-layout');
   });
 });
