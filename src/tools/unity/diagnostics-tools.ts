@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { evidenceRunId, receiptRecord, type ReceiptExecution } from '../../evidence/producer-receipt.js';
 import { resolve as resolvePath } from 'node:path';
 import { realpathSync } from 'node:fs';
 import type { BridgeClient } from '../../bridge/bridge-client.js';
 import type { ITool, ToolContext, ToolMetadata, ToolResult } from '../tool.interface.js';
 import { zodToJsonSchema } from '../../utils/zod-to-json-schema.js';
 import { BridgeTool } from './bridge-tool.js';
-import { getStaticCompileStatus } from './local-diagnostics.js';
+import { getStaticCompileStatus, type CompileStatusPayload } from './local-diagnostics.js';
 import { PlaymodeVerifyTool } from './playmode-verify.js';
 
 /** Canonical form for project-path identity (macOS /var vs /private/var). */
@@ -127,6 +128,11 @@ const verifyChangeSchema = z.object({
     options: z.array(z.string()).optional().default([]),
   }).optional(),
   includeProfiler: z.boolean().optional().default(false),
+  // The run Strada.Brain issued for this dispatch. With one, the tool carries
+  // a receipt naming the run, the tree it measured and how the compile ended
+  // (Codex 2026-09-13 AI, the compile row of its table: this path dispatched
+  // with no run id and emitted no receipt at all).
+  evidenceRunId: z.string().min(1).max(200).optional(),
 });
 
 interface CompileStatusResult {
@@ -563,6 +569,31 @@ export class ProjectToolInvokeTool extends SimpleJsonBridgeTool {
   protected override readonly requiredBridgeCapabilities = ['unity-project-extensions'];
 }
 
+/**
+ * How a HEADLESS compile ended, as this process measured it.
+ *
+ * The batch compile is a child process this tool owns, so its exit code is a
+ * real observation — and a compile that was killed has no code at all, which
+ * is said as `completed: false` rather than as a zero.
+ */
+export function offlineExecution(offline: CompileStatusPayload): ReceiptExecution {
+  const raw = (offline.diagnostics as { exitCode?: unknown } | undefined)?.exitCode;
+  const exitCode = typeof raw === 'number' && Number.isInteger(raw) ? raw : null;
+  return { completed: exitCode !== null, exitCode, timedOut: false };
+}
+
+/** The receipt field for a compile dispatch, or nothing when no run was named. */
+export function compileReceipt(
+  input: Record<string, unknown>,
+  projectPath: string,
+  medium: 'compiler' | 'editor',
+  execution: ReceiptExecution,
+): { receipt?: string } {
+  const runId = evidenceRunId(input);
+  if (runId === undefined) return {};
+  return { receipt: receiptRecord({ runId, kind: 'compile', medium, projectPath, execution }) };
+}
+
 export class VerifyChangeTool extends CompositeBridgeTool {
   // Offered with the editor closed, because it works with the editor closed: it
   // falls back to a headless Unity compile. Measured before this line existed —
@@ -716,6 +747,11 @@ export class VerifyChangeTool extends CompositeBridgeTool {
               : 'Headless compile did not produce a verdict. The change was NOT verified.',
           summary: { compileErrors: Number.isFinite(errorCount) ? errorCount : null, compileIssues: issues },
           compile: offline,
+          // THE RECEIPT FOR THE RUN THE CALLER ASKED FOR. This whole report is
+          // one JSON document, so the receipt travels in a field rather than a
+          // fenced block: the same bytes either way, which is what a receiver
+          // hashes (Codex 2026-09-13 AI, the compile row).
+          ...compileReceipt(input, context.projectPath, 'compiler', offlineExecution(offline)),
         }, null, 2),
         isError: failed || testsNotRun || (headlessTests?.ran === true && headlessTests.passed === false),
       };
@@ -753,6 +789,8 @@ export class VerifyChangeTool extends CompositeBridgeTool {
           nextStep:
             'Call unity_verify_change again with recompile:false to read the compile already in flight. Do not rewrite the code on the strength of this timeout.',
           compile: wait.compile ?? {},
+          // A COMPILE THAT DID NOT SETTLE says so in its own receipt.
+          ...compileReceipt(input, context.projectPath, 'editor', { completed: false, exitCode: null, timedOut: true }),
         }, null, 2),
         isError: true,
       };
@@ -832,6 +870,15 @@ export class VerifyChangeTool extends CompositeBridgeTool {
           buildSuccess: build?.success ?? null,
         },
         evidence,
+        // A COMPILE DRIVEN THROUGH THE LIVE EDITOR owns no process of its own:
+        // the editor stays alive, and the operation's terminal result IS the
+        // observation, so the receipt states no exit code (Codex 2026-09-12
+        // AC, 2026-09-13 AI#10).
+        ...compileReceipt(input, context.projectPath, 'editor', {
+          completed: String((evidence.compile as { status?: unknown } | undefined)?.status ?? '') === 'completed',
+          exitCode: null,
+          timedOut: false,
+        }),
       }, null, 2),
       isError: compileIssues > 0 || testFailures > 0 || emptyTestRun || !suite.ok || build?.success === false,
     };

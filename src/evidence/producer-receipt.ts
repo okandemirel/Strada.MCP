@@ -174,11 +174,17 @@ export function playerLayoutRoot(path: string): string {
   }
 }
 
-/** The fenced block a tool appends to its own report. */
-export function renderReceipt(input: ReceiptInput): string {
+/**
+ * The receipt itself, as the exact bytes a receiver will hash.
+ *
+ * A tool whose whole report is a JSON document cannot append a fenced block
+ * without breaking every reader of that document, so it carries the receipt in
+ * a field instead — the same bytes either way, which is what the hash is of.
+ */
+export function receiptRecord(input: ReceiptInput): string {
   const revision = projectRevision(input.projectPath);
   const artifactSha256 = artifactDigest(input.artifactPath);
-  const record = {
+  return JSON.stringify({
     schemaVersion: 1 as const,
     runId: input.runId,
     kind: input.kind,
@@ -190,8 +196,12 @@ export function renderReceipt(input: ReceiptInput): string {
     ...(input.sessionCount === undefined ? {} : { sessionCount: input.sessionCount }),
     ...(input.sessions === undefined ? {} : { sessions: input.sessions }),
     ...(input.payload === undefined ? {} : { payload: input.payload }),
-  };
-  return `\n\n\`\`\`${EVIDENCE_FENCE}\n${JSON.stringify(record)}\n\`\`\``;
+  });
+}
+
+/** The fenced block a tool appends to its own report. */
+export function renderReceipt(input: ReceiptInput): string {
+  return `\n\n\`\`\`${EVIDENCE_FENCE}\n${receiptRecord(input)}\n\`\`\``;
 }
 
 /** The run id a caller asked this invocation to answer for, when it did. */

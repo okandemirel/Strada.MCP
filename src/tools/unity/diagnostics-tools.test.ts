@@ -303,6 +303,50 @@ describe('VerifyChangeTool', () => {
       expect(withInconclusive.payload['status']).toBe('passed');
     });
 
+    /**
+     * Codex round AI, the compile row: this dispatch took no run id and
+     * emitted no receipt at all, so the compile behind every delivery was a
+     * file a worker could have written.
+     */
+    it('carries a receipt for the run it was given, in the report it already returns', async () => {
+      const tool = new VerifyChangeTool();
+      tool.setBridgeClient(bridgeWith({ status: 'completed', result: 'Passed', summary: { total: 1, passed: 1 } }));
+      const result = await tool.execute({ runTests: true, testMode: 'play', evidenceRunId: 'run-c1' }, createContext());
+      const payload = JSON.parse(result.content) as Record<string, any>;
+      // The whole report is one JSON document: a fenced block would break
+      // every reader of it, so the receipt is a field — the same bytes.
+      const receipt = JSON.parse(String(payload['receipt'])) as Record<string, unknown>;
+      expect(receipt).toMatchObject({
+        schemaVersion: 1, runId: 'run-c1', kind: 'compile', medium: 'editor',
+        // A LIVE EDITOR OWNS NO PROCESS: it never exits, so it states no code
+        // (Codex 2026-09-12 AC, 2026-09-13 AI#10).
+        execution: { completed: true, exitCode: null, timedOut: false },
+      });
+      // …and a dispatch that named no run says nothing.
+      const anonymous = await new VerifyChangeTool();
+      anonymous.setBridgeClient(bridgeWith({ status: 'completed', result: 'Passed', summary: { total: 1, passed: 1 } }));
+      const bare = JSON.parse((await anonymous.execute({ runTests: true, testMode: 'play' }, createContext())).content) as Record<string, unknown>;
+      expect(bare['receipt']).toBeUndefined();
+    });
+
+    it('a compile that did not settle says so in its own receipt', async () => {
+      const stuck = new VerifyChangeTool();
+      stuck.setBridgeClient(createMockBridge(async (method) => {
+        switch (method) {
+          case 'editor.recompile': return { requested: true };
+          case 'editor.compileStatus': return { isCompiling: true, isReloading: false, compileIssueCount: 0 };
+          default: return {};
+        }
+      }));
+      const result = await stuck.execute({ compileTimeoutMs: 1000, pollIntervalMs: 100, evidenceRunId: 'run-slow' }, createContext());
+      const payload = JSON.parse(result.content) as Record<string, any>;
+      expect(payload['status']).toBe('timeout');
+      expect(JSON.parse(String(payload['receipt']))).toMatchObject({
+        runId: 'run-slow', kind: 'compile', medium: 'editor',
+        execution: { completed: false, exitCode: null, timedOut: true },
+      });
+    });
+
     it('refuses a run that never reached an end state, however clean its counts', async () => {
       // The poll gives up with `status:"timeout"`, and an "error" run has
       // counts that describe an unfinished suite. (A still-"running" payload
