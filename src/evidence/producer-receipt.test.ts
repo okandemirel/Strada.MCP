@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { ARTIFACT_DIGEST_VERSION, artifactDigest, evidenceRunId, projectRevision, renderReceipt, EVIDENCE_FENCE } from './producer-receipt.js';
+import { ARTIFACT_DIGEST_VERSION, artifactDigest, artifactManifest, evidenceRunId, projectRevision, renderReceipt, EVIDENCE_FENCE } from './producer-receipt.js';
+import { writeArtifactManifest } from '../tools/unity/build-player.js';
 
 describe('producer receipts', () => {
   let dir: string;
@@ -155,5 +156,72 @@ describe('artifactDigest over a player layout', () => {
 
   it('names its scheme, so a digest written under an older one cannot pass as this', () => {
     expect(ARTIFACT_DIGEST_VERSION).toBe('strada-artifact-v3-layout');
+  });
+});
+
+/**
+ * THE FILES A BUILD SAID IT SHIPPED (Codex 2026-09-13 AJ#4).
+ *
+ * Hashing the whole player layout pulls in whatever is written beside the
+ * executable afterwards — the log the game writes on its first run — so an
+ * artifact nobody touched hashed differently before and after it ran, which a
+ * gate would call ARTIFACT_MISMATCH.
+ */
+describe('artifactDigest over a build manifest', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'manifest-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const layout = (): string => {
+    const build = join(dir, 'linux');
+    mkdirSync(join(build, 'Game_Data'), { recursive: true });
+    writeFileSync(join(build, 'Game.x86_64'), 'the executable');
+    writeFileSync(join(build, 'Game_Data', 'level0'), 'level one');
+    return join(build, 'Game.x86_64');
+  };
+
+  it('ignores what is written beside the artifact after the build', () => {
+    const exe = layout();
+    expect(writeArtifactManifest(exe)).toEqual(['Game.x86_64', 'Game_Data/level0']);
+    const built = artifactDigest(exe);
+    expect(built).toMatch(/^[0-9a-f]{64}$/);
+    // The player writes its own log next to itself; the GAME is unchanged.
+    writeFileSync(join(dir, 'linux', 'player.log'), 'started\n');
+    expect(artifactDigest(exe)).toBe(built);
+    // …and a file the build DID ship still moves it.
+    writeFileSync(join(dir, 'linux', 'Game_Data', 'level0'), 'level one, edited');
+    expect(artifactDigest(exe)).not.toBe(built);
+  });
+
+  it('a manifest that drops a file is a different manifest', () => {
+    const exe = layout();
+    writeArtifactManifest(exe);
+    const built = artifactDigest(exe);
+    writeFileSync(`${exe}.strada-artifact.json`, JSON.stringify({ version: 'strada-manifest-v1', files: ['Game.x86_64'] }));
+    expect(artifactDigest(exe)).not.toBe(built);
+  });
+
+  it('a manifest it cannot use is no manifest: the layout answers instead', () => {
+    const exe = layout();
+    for (const bad of [
+      '{not json',
+      JSON.stringify({ version: 'strada-manifest-v0', files: ['Game.x86_64'] }),
+      JSON.stringify({ version: 'strada-manifest-v1', files: [] }),
+      JSON.stringify({ version: 'strada-manifest-v1', files: ['../secrets.txt'] }),
+      JSON.stringify({ version: 'strada-manifest-v1' }),
+    ]) {
+      writeFileSync(`${exe}.strada-artifact.json`, bad);
+      expect(artifactManifest(exe)).toBeUndefined();
+      // The digest still answers — from the layout, as it did before.
+      expect(artifactDigest(exe)).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+
+  it('never lists itself', () => {
+    const exe = layout();
+    writeArtifactManifest(exe);
+    expect(artifactManifest(exe)!.files.some((f) => f.endsWith('.strada-artifact.json'))).toBe(false);
+    // …and a second call after the manifest exists lists the same files.
+    expect(writeArtifactManifest(exe)).toEqual(['Game.x86_64', 'Game_Data/level0']);
   });
 });

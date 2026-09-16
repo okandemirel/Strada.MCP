@@ -8,13 +8,14 @@
  * is what the build report and the file system say — the artifact's path,
  * its size on disk, the build's duration and every error the report holds.
  */
-import { mkdtempSync, readFileSync, existsSync, rmSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, statSync, readdirSync } from 'node:fs';
 import { EVIDENCE_RUN_ID_SCHEMA, evidenceRunId, renderReceipt } from '../../evidence/producer-receipt.js';
-import { join, isAbsolute } from 'node:path';
+import { basename, join, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
 import { runUnityProcess, type UnityProcessOutcome } from './playmode-verify.js';
+import { ARTIFACT_MANIFEST_SUFFIX, ARTIFACT_MANIFEST_VERSION, playerLayoutRoot } from '../../evidence/producer-receipt.js';
 import { resolveProjectPath } from './project-path.js';
 
 export const BUILD_TARGETS = ['android', 'ios', 'webgl', 'windows', 'macos', 'linux'] as const;
@@ -165,6 +166,41 @@ export function renderPlayerBuild(verdict: PlayerBuildVerdict): string {
 }
 
 /**
+ * Write the manifest of files this build produced, beside the artifact.
+ *
+ * BESIDE, never inside: a stray file inside a macOS .app changes the bundle.
+ * The listed paths are relative to the artifact's own directory, which is what
+ * both sides of the digest resolve them against.
+ */
+export function writeArtifactManifest(artifactPath: string): string[] {
+  const files: string[] = [];
+  const walk = (at: string, rel: string): void => {
+    const st = statSync(at);
+    if (st.isDirectory()) {
+      for (const entry of readdirSync(at).sort()) walk(join(at, entry), rel === '' ? entry : `${rel}/${entry}`);
+      return;
+    }
+    // The manifest never lists itself.
+    if (rel.endsWith(ARTIFACT_MANIFEST_SUFFIX)) return;
+    files.push(rel);
+  };
+  try {
+    // THE WHOLE PLAYER, not the named file: a Windows or Linux player is an
+    // executable plus its `<Name>_Data` folder and its libraries, and a
+    // manifest of one file would say the rest is not part of the game (AI#9).
+    const root = playerLayoutRoot(artifactPath);
+    walk(root, root === artifactPath ? basename(artifactPath) : '');
+    writeFileSync(
+      `${artifactPath}${ARTIFACT_MANIFEST_SUFFIX}`,
+      JSON.stringify({ version: ARTIFACT_MANIFEST_VERSION, files }, null, 2),
+    );
+  } catch {
+    /* an artifact with no manifest is measured on its layout, as before */
+  }
+  return files;
+}
+
+/**
  * THE RECEIPT FOR THE BUILD THE CALLER ASKED FOR. Appended, never instead of
  * the report: a person reads the prose, Strada.Brain reads the fenced block
  * and holds it against the ticket it issued.
@@ -257,6 +293,12 @@ export class BuildPlayerTool implements ITool {
       const ran = await runUnityProcess(editor.binary, args, timeoutMs);
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const verdict = judgePlayerBuild(resultPath, ran.exitCode, log);
+      // WHAT THIS BUILD SHIPPED, written beside the artifact: the files as
+      // they are NOW, before anything runs and writes a log next to them.
+      // Without it the artifact's identity was its whole folder, so a player
+      // that wrote one line of its own hashed differently afterwards (Codex
+      // 2026-09-13 AJ#4).
+      if (verdict.artifact?.path !== undefined) writeArtifactManifest(verdict.artifact.path);
       return { content: `${renderPlayerBuild(verdict)}${buildReceipt(input, projectPath, verdict, ran)}`, isError: !verdict.ok };
     } finally {
       try {
