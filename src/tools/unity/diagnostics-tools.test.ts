@@ -251,6 +251,58 @@ describe('VerifyChangeTool', () => {
       expect(String(payload['reason'])).toContain('accounts for only 277');
     });
 
+    /**
+     * Codex round AI#1: the Unity package serialized its counts and not its
+     * total, so ten passing tests through the live bridge were reported
+     * `status:"failed"` with "The test run reported ZERO tests — nothing
+     * executed" — a verified change turned into a failure.
+     */
+    it('a producer that states counts but no total is read on the counts (Codex 2026-09-13 AI#1)', async () => {
+      const { result, payload } = await verify({
+        status: 'completed',
+        result: 'Passed',
+        summary: { passed: 10, failed: 0, skipped: 0, inconclusive: 0 },
+      });
+      expect(payload['status']).toBe('passed');
+      expect(result.isError).toBeFalsy();
+      expect(String(payload['reason'] ?? '')).not.toContain('ZERO tests');
+      expect(payload['summary']['testTotal']).toBe(10);
+    });
+
+    it('…and a producer that states NOTHING is still zero tests', async () => {
+      const { result, payload } = await verify({ status: 'completed', result: 'Passed', summary: {} });
+      expect(payload['status']).toBe('failed');
+      expect(result.isError).toBe(true);
+      expect(String(payload['reason'])).toContain('ZERO tests');
+      // An explicit zero is zero, whatever else the summary says.
+      const explicit = await verify({ status: 'completed', result: 'Passed', summary: { passed: 0, failed: 0, skipped: 0 } });
+      expect(explicit.payload['status']).toBe('failed');
+      expect(String(explicit.payload['reason'])).toContain('ZERO tests');
+    });
+
+    it('the accounting check fires on a total the PRODUCER stated', async () => {
+      // A total derived from the counts cannot disagree with them; a total the
+      // producer named itself can, and that is the unverified test this check
+      // exists to catch.
+      const derived = await verify({
+        status: 'completed', result: 'Passed',
+        summary: { passed: 275, failed: 0, skipped: 2 },
+      });
+      expect(derived.payload['status']).toBe('passed');
+      const stated = await verify({
+        status: 'completed', result: 'Passed',
+        summary: { total: 278, passed: 275, failed: 0, skipped: 2 },
+      });
+      expect(stated.payload['status']).toBe('failed');
+      expect(String(stated.payload['reason'])).toContain('accounts for only 277');
+      // …and an inconclusive test IS accounted for.
+      const withInconclusive = await verify({
+        status: 'completed', result: 'Passed',
+        summary: { total: 278, passed: 275, failed: 0, skipped: 2, inconclusive: 1 },
+      });
+      expect(withInconclusive.payload['status']).toBe('passed');
+    });
+
     it('refuses a run that never reached an end state, however clean its counts', async () => {
       // The poll gives up with `status:"timeout"`, and an "error" run has
       // counts that describe an unfinished suite. (A still-"running" payload

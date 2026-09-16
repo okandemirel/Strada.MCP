@@ -35,7 +35,11 @@ namespace Strada.Mcp.Editor.Integration.TestFramework
 
                 record.Status = "completed";
                 record.FinishedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                record.Summary = BuildSummary(result);
+                // THE SUITE'S OWN OUTCOME, beside the run state. "completed"
+                // says the run ended; only this says what it ended as, and
+                // without it a failed suite was read as a finished one.
+                record.Result = result?.TestStatus.ToString() ?? "Unknown";
+                record.Summary = BuildSummary(result, record.TotalTests);
                 record.Tests = FlattenResults(result).Cast<object>().ToList();
                 record.FailedTests = record.Tests
                     .OfType<Dictionary<string, object>>()
@@ -63,6 +67,7 @@ namespace Strada.Mcp.Editor.Integration.TestFramework
             public long? StartedAt;
             public long? FinishedAt;
             public int TotalTests;
+            public string Result;
             public Dictionary<string, object> Summary = new Dictionary<string, object>();
             public List<object> Tests = new List<object>();
             public List<object> FailedTests = new List<object>();
@@ -230,14 +235,30 @@ namespace Strada.Mcp.Editor.Integration.TestFramework
             return results;
         }
 
-        private static Dictionary<string, object> BuildSummary(ITestResultAdaptor result)
+        /// <summary>
+        /// What the run executed, and how many tests it was given.
+        ///
+        /// `total` was never serialized at all, so every consumer read the
+        /// live editor bridge's ten passing tests as "the test run reported
+        /// ZERO tests — nothing executed" and turned a verified change into a
+        /// failure (Codex 2026-09-13 AI#1). It is the DISCOVERED inventory,
+        /// measured when the run started, so a run that executed fewer tests
+        /// than it was given is visible rather than self-consistent.
+        /// </summary>
+        private static Dictionary<string, object> BuildSummary(ITestResultAdaptor result, int discovered)
         {
+            var passed = result?.PassCount ?? 0;
+            var failed = result?.FailCount ?? 0;
+            var skipped = result?.SkipCount ?? 0;
+            var inconclusive = result?.InconclusiveCount ?? 0;
             return new Dictionary<string, object>
             {
-                { "passed", result?.PassCount ?? 0 },
-                { "failed", result?.FailCount ?? 0 },
-                { "skipped", result?.SkipCount ?? 0 },
-                { "inconclusive", result?.InconclusiveCount ?? 0 },
+                { "passed", passed },
+                { "failed", failed },
+                { "skipped", skipped },
+                { "inconclusive", inconclusive },
+                { "total", discovered },
+                { "executed", passed + failed + skipped + inconclusive },
                 { "status", result?.TestStatus.ToString() ?? "Unknown" }
             };
         }
@@ -273,6 +294,7 @@ namespace Strada.Mcp.Editor.Integration.TestFramework
                 { "runId", record.RunId },
                 { "mode", record.Mode },
                 { "status", record.Status },
+                { "result", record.Result },
                 { "createdAt", record.CreatedAt },
                 { "startedAt", record.StartedAt },
                 { "finishedAt", record.FinishedAt },

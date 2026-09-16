@@ -164,6 +164,27 @@ const RUN_ENDED = new Set(['completed', 'finished', 'complete', 'done']);
  * ended in success, executed something, and every test it counted is
  * accounted for. Skips are disclosed, never a pass on their own.
  */
+/**
+ * HOW MANY TESTS THE RUN WAS GIVEN, as the producer states it.
+ *
+ * The Unity package used to serialize its counts and not its total, so every
+ * consumer read ten passing tests as "ZERO tests — nothing executed" and
+ * turned a verified change into a failure (Codex 2026-09-13 AI#1). The
+ * producer states `total` now; a producer that does not — an older package
+ * still in a project — is read on the counts it DID state rather than refused
+ * for a field it never sent. Nothing is invented: with no counts either, there
+ * is no total.
+ */
+export function suiteTotal(summary: Record<string, unknown> | undefined): number {
+  const stated = Number(summary?.['total'] ?? Number.NaN);
+  if (Number.isFinite(stated)) return stated;
+  const counts = ['passed', 'failed', 'skipped', 'inconclusive']
+    .map((key) => Number(summary?.[key] ?? Number.NaN))
+    .filter((n) => Number.isFinite(n));
+  if (counts.length === 0) return Number.NaN;
+  return counts.reduce((sum, n) => sum + n, 0);
+}
+
 export function judgeSuiteResult(tests: TestResultsPayload | undefined): { ok: boolean; reason?: string } {
   if (!tests) return { ok: false, reason: 'no test run reported a result, so nothing was verified' };
   const state = String(tests.status ?? '').trim().toLowerCase();
@@ -174,7 +195,7 @@ export function judgeSuiteResult(tests: TestResultsPayload | undefined): { ok: b
   if (outcome !== '' && !SUITE_SUCCESS.has(outcome)) {
     return { ok: false, reason: `the test run's own result is "${tests.result}", not a pass` };
   }
-  const total = Number(tests.summary?.total ?? Number.NaN);
+  const total = suiteTotal(tests.summary);
   if (!Number.isFinite(total) || total <= 0) {
     return { ok: false, reason: 'the test run reported no tests at all' };
   }
@@ -188,14 +209,18 @@ export function judgeSuiteResult(tests: TestResultsPayload | undefined): { ok: b
   // EVERY TEST ACCOUNTED FOR. A summary of total 278 / passed 275 / skipped 2
   // / failed 0 leaves one test that neither passed, failed nor was skipped —
   // an unverified claim reported as a green suite.
+  // A total DERIVED from these same counts cannot disagree with them, so this
+  // only ever fires on a total the producer stated itself.
   if (Number.isFinite(passed)) {
-    const counted = passed + (Number.isFinite(failed) ? failed : 0) + (Number.isFinite(skipped) ? skipped : 0);
+    const counted = passed + (Number.isFinite(failed) ? failed : 0) + (Number.isFinite(skipped) ? skipped : 0)
+      + (Number.isFinite(Number(tests.summary?.['inconclusive'])) ? Number(tests.summary?.['inconclusive']) : 0);
     if (counted < total) {
       return {
         ok: false,
         reason:
           `the test run counted ${total} test(s) but accounts for only ${counted} ` +
-          `(passed ${passed}, failed ${Number.isFinite(failed) ? failed : 'unknown'}, skipped ${Number.isFinite(skipped) ? skipped : 'unknown'})`,
+          `(passed ${passed}, failed ${Number.isFinite(failed) ? failed : 'unknown'}, skipped ${Number.isFinite(skipped) ? skipped : 'unknown'}` +
+          `, inconclusive ${Number.isFinite(Number(tests.summary?.['inconclusive'])) ? Number(tests.summary?.['inconclusive']) : 'unknown'})`,
       };
     }
   }
@@ -773,7 +798,7 @@ export class VerifyChangeTool extends CompositeBridgeTool {
     // Zero tests is not a pass — a test run whose total is 0 (assembly did not
     // compile, filter matched nothing) proved nothing. Same rule the headless
     // playmode path has always enforced.
-    const testTotal = Number(tests?.summary?.total ?? Number.NaN);
+    const testTotal = suiteTotal(tests?.summary);
     // A SUITE THAT DID NOT PASS IS NOT A PASS, whatever its failure count
     // says (Codex 2026-09-12 AC J4.1).
     const suite = parsed.runTests === true ? judgeSuiteResult(tests) : { ok: true as const, reason: undefined };
