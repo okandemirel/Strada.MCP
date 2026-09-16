@@ -737,7 +737,8 @@ export class PlaythroughTool implements ITool {
       if (input['outcomeRequired'] === true) env['STRADA_PLAYTHROUGH_OUTCOME_REQUIRED'] = '1';
       if (typeof input['bootDeadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_BOOT_DEADLINE_S'] = String(Math.floor(input['bootDeadlineSeconds']));
 
-      const exitCode = await runUnityProcess(editor.binary, args, 580_000, env);
+      const ran = await runUnityProcess(editor.binary, args, 580_000, env);
+      const exitCode = ran.exitCode;
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const outcome = existsSync(resultsPath) ? parseTestRun(readFileSync(resultsPath, 'utf8')) : null;
       const verdict = withProcessOutcome(

@@ -14,7 +14,7 @@ import { join, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
-import { runUnityProcess } from './playmode-verify.js';
+import { runUnityProcess, type UnityProcessOutcome } from './playmode-verify.js';
 import { resolveProjectPath } from './project-path.js';
 
 export const BUILD_TARGETS = ['android', 'ios', 'webgl', 'windows', 'macos', 'linux'] as const;
@@ -164,6 +164,35 @@ export function renderPlayerBuild(verdict: PlayerBuildVerdict): string {
   return lines.join('\n');
 }
 
+/**
+ * THE RECEIPT FOR THE BUILD THE CALLER ASKED FOR. Appended, never instead of
+ * the report: a person reads the prose, Strada.Brain reads the fenced block
+ * and holds it against the ticket it issued.
+ *
+ * `timedOut` is MEASURED AT THE SOURCE. It used to be estimated from the
+ * clock — the runner itself knows whether IT killed the editor — so a build
+ * finishing a millisecond late read as a timeout while one killed early read
+ * as clean (Codex 2026-09-13 AI, the player-build row).
+ */
+export function buildReceipt(
+  input: Record<string, unknown>,
+  projectPath: string,
+  verdict: PlayerBuildVerdict,
+  ran: UnityProcessOutcome,
+): string {
+  const runId = evidenceRunId(input);
+  if (runId === undefined) return '';
+  return renderReceipt({
+    runId,
+    kind: 'player-build',
+    medium: 'builder',
+    projectPath,
+    ...(verdict.result?.target === undefined ? {} : { target: verdict.result.target }),
+    ...(verdict.artifact?.path === undefined ? {} : { artifactPath: verdict.artifact.path }),
+    execution: { completed: ran.completed, exitCode: ran.exitCode, timedOut: ran.timedOut },
+  });
+}
+
 export class BuildPlayerTool implements ITool {
   readonly name = 'unity_build_player';
   readonly description =
@@ -225,31 +254,10 @@ export class BuildPlayerTool implements ITool {
     const logPath = join(scratch, 'build.log');
     try {
       const args = buildPlayerArgs({ projectPath, resultPath, logPath, target, outputDir });
-      const startedAt = Date.now();
-      const exitCode = await runUnityProcess(editor.binary, args, timeoutMs);
-      // MEASURED, not guessed: the runner kills the editor at the budget and
-      // reports the signal like any other exit, so the clock is what says
-      // whether this run hit its deadline.
-      const timedOut = Date.now() - startedAt >= timeoutMs;
+      const ran = await runUnityProcess(editor.binary, args, timeoutMs);
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
-      const verdict = judgePlayerBuild(resultPath, exitCode, log);
-      // THE RECEIPT FOR THE RUN THE CALLER ASKED FOR. Appended, never
-      // instead of the report: a person reads the prose, Strada.Brain reads
-      // the fenced block and holds it against the ticket it issued.
-      const runId = evidenceRunId(input);
-      const receipt =
-        runId === undefined
-          ? ''
-          : renderReceipt({
-            runId,
-            kind: 'player-build',
-            medium: 'builder',
-            projectPath,
-            ...(verdict.result?.target === undefined ? {} : { target: verdict.result.target }),
-            ...(verdict.artifact?.path === undefined ? {} : { artifactPath: verdict.artifact.path }),
-            execution: { completed: !timedOut, exitCode, timedOut },
-          });
-      return { content: `${renderPlayerBuild(verdict)}${receipt}`, isError: !verdict.ok };
+      const verdict = judgePlayerBuild(resultPath, ran.exitCode, log);
+      return { content: `${renderPlayerBuild(verdict)}${buildReceipt(input, projectPath, verdict, ran)}`, isError: !verdict.ok };
     } finally {
       try {
         rmSync(scratch, { recursive: true, force: true });

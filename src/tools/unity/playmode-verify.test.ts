@@ -1,3 +1,4 @@
+import { runUnityProcess, suiteReceipt } from './playmode-verify.js';
 
 describe('the PlayMode run record (2026-09-10)', () => {
   it('is written from the NUnit counts and the call arguments, with unfiltered a fact of the call', async () => {
@@ -15,5 +16,76 @@ describe('the PlayMode run record (2026-09-10)', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * THE SUITE ANSWERS FOR ITS RUN (Codex 2026-09-13 AI, the playmode-suite row).
+ *
+ * This path wrote an unticketed result file and nothing else: the suite behind
+ * every delivery was a file a worker could have written.
+ */
+describe('the suite receipt', () => {
+  const outcome = { result: 'Passed', total: 10, passed: 10, failed: 0, skipped: 0 } as never;
+  const read = (text: string) => JSON.parse(/```strada-evidence\n([\s\S]*?)\n```/.exec(text)![1]!) as Record<string, any>;
+
+  it('states how the editor ended, what ran, the scope it ran in, and the bytes it read', () => {
+    const receipt = read(suiteReceipt(
+      { evidenceRunId: 'run-s1', testFilter: 'Game.Board.Tests', categories: ' ' },
+      '/tmp/project',
+      { outcome, exceptions: 0, xml: '<test-run total="10"/>', ran: { exitCode: 0, timedOut: false, completed: true } },
+    ));
+    expect(receipt).toMatchObject({
+      schemaVersion: 1, runId: 'run-s1', kind: 'playmode-suite', medium: 'editor',
+      execution: { completed: true, exitCode: 0, timedOut: false },
+    });
+    expect(receipt['payload']).toMatchObject({
+      result: 'Passed', total: 10, passed: 10, failed: 0, skipped: 0, exceptions: 0,
+      // A FILTERED green is the run choosing which tests count, and the
+      // receipt says which filter; a blank one is no filter at all.
+      filter: 'Game.Board.Tests', categories: null,
+    });
+    expect(String(receipt['payload']['resultsSha256'])).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('an editor killed at the deadline is not one that completed', () => {
+    const killed = read(suiteReceipt(
+      { evidenceRunId: 'run-s2' },
+      '/tmp/project',
+      { outcome, exceptions: 2, xml: '<test-run/>', ran: { exitCode: -1, timedOut: true, completed: false } },
+    ));
+    expect(killed['execution']).toEqual({ completed: false, exitCode: -1, timedOut: true });
+    expect(killed['payload']['exceptions']).toBe(2);
+  });
+
+  it('the digest is of the RESULTS, so two runs of different results differ', () => {
+    const digest = (xml: string) => read(suiteReceipt(
+      { evidenceRunId: 'r' }, '/tmp/project',
+      { outcome, exceptions: 0, xml, ran: { exitCode: 0, timedOut: false, completed: true } },
+    ))['payload']['resultsSha256'];
+    expect(digest('<test-run passed="10"/>')).not.toBe(digest('<test-run passed="9"/>'));
+  });
+
+  it('says nothing at all when no run id was issued', () => {
+    expect(suiteReceipt({}, '/tmp/project', {
+      outcome, exceptions: 0, xml: '<test-run/>', ran: { exitCode: 0, timedOut: false, completed: true },
+    })).toBe('');
+  });
+});
+
+/**
+ * A Unity batch run that was KILLED is not one that exited.
+ *
+ * Both came back -1, so every caller that had to state `timedOut` guessed it
+ * from the clock — a build finishing a millisecond late read as a timeout,
+ * one killed early read as clean (Codex 2026-09-13 AI).
+ */
+describe('runUnityProcess measures how the editor ended', () => {
+  it('a process killed at the deadline says so; one that exits keeps its code', async () => {
+    expect(await runUnityProcess('/bin/sh', ['-c', 'sleep 30'], 150)).toMatchObject({ timedOut: true, completed: false });
+    expect(await runUnityProcess('/bin/sh', ['-c', 'exit 42'], 10_000)).toEqual({ exitCode: 42, timedOut: false, completed: true });
+    expect(await runUnityProcess('/bin/sh', ['-c', 'exit 0'], 10_000)).toEqual({ exitCode: 0, timedOut: false, completed: true });
+    // A binary that cannot be spawned completed nothing.
+    expect(await runUnityProcess('/nonexistent/unity', [], 10_000)).toMatchObject({ completed: false, exitCode: -1 });
   });
 });

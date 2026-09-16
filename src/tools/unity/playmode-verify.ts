@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { EVIDENCE_RUN_ID_SCHEMA, evidenceRunId, renderReceipt } from '../../evidence/producer-receipt.js';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { describeEmptyRun, findPlayModeTestAssemblies } from './playmode-empty-run.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
-import { parseTestRun, failedTests, playmodeVerdict } from './nunit-results.js';
+import { parseTestRun, failedTests, playmodeVerdict, type TestRunOutcome } from './nunit-results.js';
 import type { FailedTest } from './nunit-results.js';
 import { resolveProjectPath } from './project-path.js';
 
@@ -158,6 +159,7 @@ export class PlaymodeVerifyTool implements ITool {
         type: 'number',
         description: 'How many frames to record (default 120, about two seconds at 60 fps).',
       },
+      evidenceRunId: EVIDENCE_RUN_ID_SCHEMA,
     },
     required: [],
   };
@@ -246,7 +248,8 @@ export class PlaymodeVerifyTool implements ITool {
         }
       }
 
-      const exitCode = await this.runUnity(editor.binary, args, 580_000, captureEnv);
+      const ran = await this.runUnity(editor.binary, args, 580_000, captureEnv);
+      const exitCode = ran.exitCode;
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
 
       if (!existsSync(resultsPath)) {
@@ -289,6 +292,12 @@ export class PlaymodeVerifyTool implements ITool {
       // playmodeResultShape for what this covers and what it does not.
       const shape = playmodeResultShape(verdict.passed, this.compileErrorsIn(log));
 
+      // THE RECEIPT FOR THE RUN THE CALLER ASKED FOR: how this batch editor
+      // ended, the suite as the NUnit file states it, the SCOPE that was
+      // actually run, and the digest of the results file the numbers came from
+      // — so nothing has to trust a file that could have been written by
+      // anything (Codex 2026-09-13 AI, the playmode-suite row).
+      const receipt = suiteReceipt(input, projectPath, { outcome, exceptions: exceptions.length, xml, ran });
       return {
         content:
           this.render(
@@ -305,7 +314,8 @@ export class PlaymodeVerifyTool implements ITool {
             verdict.reason === 'nothing-ran' ? findPlayModeTestAssemblies(projectPath) : undefined,
           ) +
           shape.suffix +
-          (captureDir === null ? '' : this.renderCapture(captureDir, log)),
+          (captureDir === null ? '' : this.renderCapture(captureDir, log)) +
+          receipt,
         isError: shape.isError,
       };
     } finally {
@@ -532,9 +542,71 @@ export class PlaymodeVerifyTool implements ITool {
     args: string[],
     timeoutMs: number,
     env: Record<string, string> = {},
-  ): Promise<number> {
+  ): Promise<UnityProcessOutcome> {
     return runUnityProcess(binary, args, timeoutMs, env);
   }
+}
+
+/**
+ * THE RECEIPT FOR A SUITE RUN THE CALLER ASKED FOR.
+ *
+ * How this batch editor ended, the suite as the NUnit file states it, the
+ * SCOPE that was actually run, and the digest of the results file the numbers
+ * came from — so nothing has to trust a file that could have been written by
+ * anything (Codex 2026-09-13 AI, the playmode-suite row).
+ */
+export function suiteReceipt(
+  input: Record<string, unknown>,
+  projectPath: string,
+  measured: {
+    readonly outcome: TestRunOutcome;
+    readonly exceptions: number;
+    readonly xml: string;
+    readonly ran: UnityProcessOutcome;
+  },
+): string {
+  const runId = evidenceRunId(input);
+  if (runId === undefined) return '';
+  const scope = (key: string): string | null => {
+    const raw = input[key];
+    return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null;
+  };
+  return renderReceipt({
+    runId,
+    kind: 'playmode-suite',
+    medium: 'editor',
+    projectPath,
+    execution: { completed: measured.ran.completed, exitCode: measured.ran.exitCode, timedOut: measured.ran.timedOut },
+    payload: {
+      result: measured.outcome.result,
+      total: measured.outcome.total,
+      passed: measured.outcome.passed,
+      failed: measured.outcome.failed,
+      skipped: measured.outcome.skipped,
+      exceptions: measured.exceptions,
+      // WHAT WAS ACTUALLY RUN, from the call's own arguments: a filtered green
+      // is the run choosing which tests count, and the receipt says so.
+      filter: scope('testFilter'),
+      categories: scope('categories'),
+      // The bytes the numbers were read from.
+      resultsSha256: createHash('sha256').update(measured.xml).digest('hex'),
+    },
+  });
+}
+
+/**
+ * How a Unity batch run ended, as THIS process observed it.
+ *
+ * The exit code alone could not tell an editor killed at the deadline from one
+ * that chose to exit non-zero — both came back -1 — so every caller that had
+ * to state `timedOut` guessed it from the clock (Codex 2026-09-13 AI).
+ */
+export interface UnityProcessOutcome {
+  readonly exitCode: number;
+  /** The deadline fired and this process killed the editor. */
+  readonly timedOut: boolean;
+  /** The editor was spawned and closed on its own. */
+  readonly completed: boolean;
 }
 
 /** Where the last PlayMode run's NUnit-derived record goes, relative to the project. */
@@ -579,24 +651,26 @@ export function runUnityProcess(
   args: string[],
   timeoutMs: number,
   env: Record<string, string> = {},
-): Promise<number> {
+): Promise<UnityProcessOutcome> {
   {
     return new Promise((resolve) => {
       const child = spawn(binary, args, {
         stdio: 'ignore',
         env: { ...process.env, ...env },
       });
+      let timedOut = false;
       // We never pass -quit, so a hung Editor is otherwise unbounded.
       const timer = setTimeout(() => {
+        timedOut = true;
         try { child.kill('SIGKILL'); } catch { /* already gone */ }
       }, timeoutMs);
       child.on('close', (code) => {
         clearTimeout(timer);
-        resolve(code ?? -1);
+        resolve({ exitCode: code ?? -1, timedOut, completed: !timedOut });
       });
       child.on('error', () => {
         clearTimeout(timer);
-        resolve(-1);
+        resolve({ exitCode: -1, timedOut, completed: false });
       });
     });
   }
