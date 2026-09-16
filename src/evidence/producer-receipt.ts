@@ -12,8 +12,8 @@
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 export const EVIDENCE_FENCE = 'strada-evidence';
 
@@ -64,7 +64,16 @@ export interface ReceiptInput {
   readonly payload?: Record<string, unknown>;
 }
 
-/** The project's revision as THIS process reads it, or nothing. */
+/**
+ * The project's revision as THIS process reads it.
+ *
+ * Three answers, not two: the revision; `''` for a project this process
+ * CONFIRMED has no repository (no `.git` anywhere above it); and `undefined`
+ * when it could not tell. A correct project outside any repository used to
+ * produce a receipt with no revision at all while the coordinator bound `''`,
+ * so the two never agreed and no run on such a project could be admitted
+ * (Codex 2026-09-13 AI#6). Unknown stays unknown: it is not "no repository".
+ */
 export function projectRevision(projectPath: string): string | undefined {
   try {
     const out = execFileSync('git', ['-C', projectPath, 'rev-parse', 'HEAD'], {
@@ -72,9 +81,38 @@ export function projectRevision(projectPath: string): string | undefined {
       timeout: 5_000,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    return /^[0-9a-f]{40}$/i.test(out) ? out : undefined;
+    if (/^[0-9a-f]{40}$/i.test(out)) return out;
   } catch {
-    return undefined;
+    /* fall through to the repository question */
+  }
+  return noRepositoryHere(projectPath) ? '' : undefined;
+}
+
+/** Is there CONFIRMED no repository above this path? */
+function noRepositoryHere(projectPath: string): boolean {
+  try {
+    const inside = execFileSync('git', ['-C', projectPath, 'rev-parse', '--is-inside-work-tree'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    // Inside a work tree with no readable HEAD: an unborn or broken
+    // repository, which is not the same as having none.
+    return inside !== 'true' ? !anyGitAbove(projectPath) : false;
+  } catch {
+    // The command also fails when git itself cannot run, and those cannot be
+    // told apart — so only a tree with no `.git` anywhere above it counts.
+    return !anyGitAbove(projectPath);
+  }
+}
+
+function anyGitAbove(from: string): boolean {
+  let at = resolve(from);
+  for (;;) {
+    if (existsSync(join(at, '.git'))) return true;
+    const up = dirname(at);
+    if (up === at) return false;
+    at = up;
   }
 }
 

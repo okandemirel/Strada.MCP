@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { artifactDigest, evidenceRunId, renderReceipt, EVIDENCE_FENCE } from './producer-receipt.js';
+import { execFileSync } from 'node:child_process';
+import { artifactDigest, evidenceRunId, projectRevision, renderReceipt, EVIDENCE_FENCE } from './producer-receipt.js';
 
 describe('producer receipts', () => {
   let dir: string;
@@ -28,8 +29,10 @@ describe('producer receipts', () => {
       target: 'Android',
       execution: { completed: true, exitCode: 0, timedOut: false },
     });
-    // No git here: the revision is absent rather than invented.
-    expect(json['revision']).toBeUndefined();
+    // No repository here, CONFIRMED: the receipt says so with the empty
+    // string, which is the answer the coordinator binds for such a tree
+    // (Codex 2026-09-13 AI#6). A revision it could not read stays absent.
+    expect(json['revision']).toBe('');
     expect(json['artifactSha256']).toBeUndefined();
   });
 
@@ -64,5 +67,49 @@ describe('producer receipts', () => {
     expect(evidenceRunId({ evidenceRunId: '' })).toBeUndefined();
     expect(evidenceRunId({ evidenceRunId: 42 })).toBeUndefined();
     expect(evidenceRunId({})).toBeUndefined();
+  });
+});
+
+/**
+ * THREE ANSWERS, NOT TWO (Codex 2026-09-13 AI#6).
+ *
+ * A correct Unity project outside any repository produced a receipt with no
+ * revision at all, while the coordinator bound the empty string: the two could
+ * never agree, so no run on such a project could be admitted. An unborn or
+ * broken repository is a different thing again — unknown is not "no
+ * repository".
+ */
+describe('projectRevision', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'revision-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const git = (...args: string[]): string =>
+    execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+
+  it('says "" for a project it confirmed has no repository', () => {
+    expect(projectRevision(dir)).toBe('');
+    // …and the receipt then carries that answer, so both sides can agree.
+    const fenced = renderReceipt({
+      runId: 'r', kind: 'compile', medium: 'compiler', projectPath: dir,
+      execution: { completed: true, exitCode: 0, timedOut: false },
+    });
+    expect(JSON.parse(/```strada-evidence\n([\s\S]*?)\n```/.exec(fenced)![1]!)['revision']).toBe('');
+  });
+
+  it('says nothing for a repository it cannot read a revision from', () => {
+    git('init', '-q');
+    // An unborn repository: inside a work tree, no HEAD to read.
+    expect(projectRevision(dir)).toBeUndefined();
+  });
+
+  it('names the revision when there is one', () => {
+    git('init', '-q');
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(dir, 'a.txt'), 'a');
+    git('add', '-A');
+    git('commit', '-qm', 'one');
+    expect(projectRevision(dir)).toBe(git('rev-parse', 'HEAD').trim());
   });
 });
