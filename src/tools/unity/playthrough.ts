@@ -20,6 +20,7 @@
 import { mkdtempSync, readFileSync, existsSync, rmSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { ReceiptSession } from '../../evidence/producer-receipt.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
 import { buildPlaymodeArgs, runUnityProcess } from './playmode-verify.js';
@@ -124,6 +125,37 @@ export interface SessionRecord {
    * (Codex 2026-09-13 AG#1). Absent on older records.
    */
   contentFingerprint?: string;
+}
+
+/**
+ * The sessions a play-through can ANSWER FOR, in the receipt's own shape.
+ *
+ * A session is carried only when the runner measured everything a receiver
+ * needs to judge it: which session was asked for, which was played, and
+ * whether the game confirmed the identity. An older runner that reports none
+ * of that leaves the session out, and the receiver then says the session is
+ * missing — which is true — instead of admitting a record whose gaps were
+ * filled in here (Codex 2026-09-13 AH#6).
+ */
+export function receiptSessions(record: PlaythroughRecord | null): ReceiptSession[] | undefined {
+  const sessions = record?.sessions;
+  if (sessions === undefined) return undefined;
+  const out: ReceiptSession[] = [];
+  for (const s of sessions) {
+    if (typeof s.requestedIndex !== 'number' || typeof s.identityVerified !== 'boolean') continue;
+    out.push({
+      requestedIndex: s.requestedIndex,
+      index: s.index,
+      ...(typeof s.observedIndex === 'number' ? { observedIndex: s.observedIndex } : {}),
+      identityVerified: s.identityVerified,
+      ...(s.identitySource === undefined ? {} : { identitySource: s.identitySource }),
+      actions: s.actions,
+      outcome: s.outcome ?? 'None',
+      reachedOutcome: s.reachedOutcome,
+      seconds: s.seconds,
+    });
+  }
+  return out;
 }
 
 /**

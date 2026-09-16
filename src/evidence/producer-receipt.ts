@@ -31,6 +31,26 @@ export interface ReceiptExecution {
   readonly timedOut: boolean;
 }
 
+/**
+ * One session a play-through receipt answers for.
+ *
+ * Every field is a MEASUREMENT: a runner that cannot say which session it was
+ * asked for, or whether the game confirmed the identity, must leave the
+ * session out rather than fill the gap in — the receiver then reports the
+ * session as missing instead of admitting an invented one.
+ */
+export interface ReceiptSession {
+  readonly requestedIndex: number;
+  readonly index: number;
+  readonly observedIndex?: number;
+  readonly identityVerified: boolean;
+  readonly identitySource?: 'active-session' | 'start-acceptance' | 'unverified';
+  readonly actions: number;
+  readonly outcome: string;
+  readonly reachedOutcome: boolean;
+  readonly seconds: number;
+}
+
 export interface ReceiptInput {
   readonly runId: string;
   readonly kind: 'compile' | 'playmode-suite' | 'player-build' | 'playthrough';
@@ -40,6 +60,7 @@ export interface ReceiptInput {
   readonly target?: string;
   readonly artifactPath?: string;
   readonly sessionCount?: number;
+  readonly sessions?: readonly ReceiptSession[];
   readonly payload?: Record<string, unknown>;
 }
 
@@ -103,6 +124,7 @@ export function renderReceipt(input: ReceiptInput): string {
     ...(artifactSha256 === undefined ? {} : { artifactSha256 }),
     execution: input.execution,
     ...(input.sessionCount === undefined ? {} : { sessionCount: input.sessionCount }),
+    ...(input.sessions === undefined ? {} : { sessions: input.sessions }),
     ...(input.payload === undefined ? {} : { payload: input.payload }),
   };
   return `\n\n\`\`\`${EVIDENCE_FENCE}\n${JSON.stringify(record)}\n\`\`\``;

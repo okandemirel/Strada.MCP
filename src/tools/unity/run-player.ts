@@ -1,9 +1,11 @@
 import { spawn } from 'node:child_process';
+import { EVIDENCE_RUN_ID_SCHEMA, evidenceRunId, renderReceipt } from '../../evidence/producer-receipt.js';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, basename } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { resolveProjectPath } from './project-path.js';
-import { judgePlaythrough, renderVerdict, withProcessOutcome, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
+import { judgePlaythrough, receiptSessions, renderVerdict, withProcessOutcome, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
+import type { PlaythroughVerdict } from './playthrough.js';
 import { PLAYTHROUGH_RECORD_FILE, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
 /**
@@ -82,15 +84,73 @@ export function newestArtifact(projectPath: string): string | null {
   return best ? (best as { path: string }).path : null;
 }
 
+/**
+ * How the player process ended, as THIS process observed it.
+ *
+ * The exit code alone could not tell a player killed at the deadline from one
+ * that chose to exit non-zero, and a receipt that has to state `timedOut`
+ * would have had to guess (Codex 2026-09-13 AH#9).
+ */
+export interface PlayerProcessOutcome {
+  readonly exitCode: number;
+  /** The deadline fired and this process killed the player. */
+  readonly timedOut: boolean;
+  /** The player was spawned and reached a close of its own. */
+  readonly completed: boolean;
+}
+
 /** Spawn the player and wait for it to exit (SIGKILL at the deadline). */
-export function runPlayerProcess(executable: string, args: string[], timeoutMs: number): Promise<number> {
+export function runPlayerProcess(executable: string, args: string[], timeoutMs: number): Promise<PlayerProcessOutcome> {
   return new Promise((resolve) => {
     const child = spawn(executable, args, { stdio: 'ignore' });
+    let timedOut = false;
     const timer = setTimeout(() => {
+      timedOut = true;
       try { child.kill('SIGKILL'); } catch { /* gone */ }
     }, timeoutMs);
-    child.on('close', (code) => { clearTimeout(timer); resolve(code ?? -1); });
-    child.on('error', () => { clearTimeout(timer); resolve(-1); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ exitCode: code ?? -1, timedOut, completed: !timedOut }); });
+    child.on('error', () => { clearTimeout(timer); resolve({ exitCode: -1, timedOut, completed: false }); });
+  });
+}
+
+/**
+ * THE RECEIPT FOR THE RUN THE CALLER ASKED FOR: the artifact that was played,
+ * as this process measured it, and how the player ended.
+ *
+ * The player path returned none, so no play-through could ever be admitted —
+ * the coordinator's receiver answered "the record names no artifact digest"
+ * for every real run (Codex 2026-09-13 AH#6). Nothing here is a literal the
+ * caller cannot check: a player this process SIGKILLed says so (AH#9).
+ */
+export function playerReceipt(
+  dispatch: { readonly runId?: string; readonly target?: string },
+  projectPath: string,
+  artifact: string,
+  process_: PlayerProcessOutcome,
+  verdict: PlaythroughVerdict,
+): string {
+  const runId = dispatch.runId;
+  if (runId === undefined) return '';
+  const sessions = receiptSessions(verdict.record);
+  const catalogue = verdict.record?.sessionCount;
+  return renderReceipt({
+    runId,
+    kind: 'playthrough',
+    medium: 'player',
+    projectPath,
+    artifactPath: artifact,
+    // THE DISPATCH THIS RECORD ANSWERS — the run id and the caller's platform
+    // label. Not a measurement: the artifact digest below is what binds the
+    // record to the bytes that ran. A receipt that could not name the target
+    // its ticket named was refused TARGET_MISMATCH for every real player run
+    // (measured 2026-09-13 while closing AH#6).
+    ...(dispatch.target === undefined ? {} : { target: dispatch.target }),
+    execution: { completed: process_.completed, exitCode: process_.exitCode, timedOut: process_.timedOut },
+    // THE CATALOGUE AS THE GAME REPORTS IT: -1 means "this game registers no
+    // catalog", and passing that on would answer "play every session" with a
+    // negative size.
+    ...(typeof catalogue === 'number' && catalogue >= 0 ? { sessionCount: catalogue } : {}),
+    ...(sessions === undefined ? {} : { sessions }),
   });
 }
 
@@ -115,6 +175,13 @@ export class RunPlayerTool implements ITool {
       },
       maxActions: { type: 'number', description: 'Upper bound on driver actions per session (default 60).' },
       deadlineSeconds: { type: 'number', description: 'How long a session may run before it is judged unfinished (default 45).' },
+      evidenceRunId: EVIDENCE_RUN_ID_SCHEMA,
+      evidenceTarget: {
+        type: 'string',
+        description:
+          'The platform label the caller\'s ticket names for this run (e.g. StandaloneOSX). Echoed into the receipt ' +
+          'so the coordinator can tell which dispatch the record answers; it changes nothing about what is played.',
+      },
       outcomeRequired: {
         type: 'boolean',
         description:
@@ -182,7 +249,8 @@ export class RunPlayerTool implements ITool {
     if (outcomeRequired) args.push('-stradaPlaythroughOutcomeRequired', '1');
     const sessionsRequested = typeof input['sessions'] === 'string' ? MAX_SESSIONS_PER_RUN : 1;
     const timeoutMs = (boot + 15 + sessionsRequested * (deadline + 5)) * 1000 + 30_000;
-    const exitCode = await runPlayerProcess(executable, args, timeoutMs);
+    const process_ = await runPlayerProcess(executable, args, timeoutMs);
+    const exitCode = process_.exitCode;
     const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
     const judged = judgePlaythrough(captureDir, undefined, log, { outcomeRequired });
     // A PLAYER THAT DIED IS NOT A PLAYER THAT PLAYED. The exit code was
@@ -196,10 +264,15 @@ export class RunPlayerTool implements ITool {
     } catch {
       /* the verdict is still returned */
     }
+    const label = typeof input['evidenceTarget'] === 'string' && input['evidenceTarget'].trim() !== '' ? input['evidenceTarget'].trim() : undefined;
+    const receipt = playerReceipt(
+      { ...(evidenceRunId(input) === undefined ? {} : { runId: evidenceRunId(input) }), ...(label === undefined ? {} : { target: label }) },
+      projectPath, artifact, process_, verdict,
+    );
     const header =
       `Player: ${basename(artifact)} (${executable}); exit ${exitCode}` +
       (verdict.record === null ? ' — the runner wrote no record: the player exited before it armed, or the artifact was built without Strada.Core.Play.PlayerPlaythroughRunner' : '') +
       '\n';
-    return { content: header + renderVerdict(verdict, captureDir), isError: !verdict.ok };
+    return { content: header + renderVerdict(verdict, captureDir) + receipt, isError: !verdict.ok };
   }
 }

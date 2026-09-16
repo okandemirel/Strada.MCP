@@ -8,8 +8,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { findPlayerExecutable, newestArtifact, RunPlayerTool, PLAYER_CAPTURE_SUBDIR } from './run-player.js';
+import { findPlayerExecutable, newestArtifact, playerReceipt, runPlayerProcess, RunPlayerTool, PLAYER_CAPTURE_SUBDIR } from './run-player.js';
 import { encodeRgbPng } from './png-metrics.test.js';
+import { artifactDigest } from '../../evidence/producer-receipt.js';
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'run-player-')); });
@@ -164,5 +165,119 @@ describe('a failing exit invalidates the verdict', () => {
     ) as { ok: boolean; reasons: string[] };
     expect(written.ok).toBe(false);
     expect(written.reasons.join(' ')).toContain('the player exited 42');
+  });
+});
+
+/**
+ * THE RECEIPT FOR THE RUN THE CALLER ASKED FOR.
+ *
+ * Strada.Brain issues a run id before it dispatches and validates a receipt
+ * afterwards. The player path returned none, so a correct play-through could
+ * never be admitted — the coordinator's own receiver answered "the record
+ * names no artifact digest" for every real run (Codex 2026-09-13 AH#6).
+ */
+describe('the evidence receipt', () => {
+  const identified = {
+    ...playerRecord,
+    sessionCount: 1,
+    sessions: [{
+      index: 1, requestedIndex: 1, observedIndex: 1, identityVerified: true, identitySource: 'active-session',
+      startAccepted: true, phasesSeen: ['Playing', 'Won'], actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 4.0,
+    }],
+  };
+  const receiptOf = (content: string): Record<string, unknown> => {
+    const fenced = /```strada-evidence\n([\s\S]*?)\n```/.exec(content);
+    expect(fenced).not.toBeNull();
+    return JSON.parse(fenced![1]!) as Record<string, unknown>;
+  };
+
+  it('names the run, the artifact as this process measured it, and every identified session', async () => {
+    const artifact = join(root, 'Builds', 'linux', 'Game.x86_64');
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', identified);
+    const result = await new RunPlayerTool().execute(
+      { deadlineSeconds: 5, evidenceRunId: 'run-abc', evidenceTarget: 'StandaloneLinux64' },
+      { projectPath: root } as never,
+    );
+
+    const receipt = receiptOf(result.content);
+    expect(receipt).toMatchObject({
+      schemaVersion: 1,
+      runId: 'run-abc',
+      kind: 'playthrough',
+      medium: 'player',
+      execution: { completed: true, exitCode: 0, timedOut: false },
+      sessionCount: 1,
+    });
+    // The digest is of the artifact THIS process read, not a string the
+    // caller passed in: the same bytes hash the same both sides.
+    expect(receipt['artifactSha256']).toBe(artifactDigest(artifact));
+    expect(receipt['target']).toBe('StandaloneLinux64');
+    expect(receipt['sessions']).toEqual([{
+      requestedIndex: 1, index: 1, observedIndex: 1, identityVerified: true,
+      identitySource: 'active-session', actions: 9, outcome: 'Won', reachedOutcome: true, seconds: 4,
+    }]);
+  });
+
+  it('a session whose identity the runner never measured is left out rather than filled in', async () => {
+    // playerRecord's session carries neither requestedIndex nor
+    // identityVerified — an older runner. Inventing either would hand the
+    // receiver a verified session nobody verified.
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    const result = await new RunPlayerTool().execute(
+      { deadlineSeconds: 5, evidenceRunId: 'run-old' },
+      { projectPath: root } as never,
+    );
+    expect(receiptOf(result.content)['sessions']).toEqual([]);
+  });
+
+  it('a player killed at the deadline is not a player that completed', async () => {
+    // `completed: true, timedOut: false` used to be written as literals, so a
+    // receipt for a player this process SIGKILLed claimed a normal end
+    // (Codex 2026-09-13 AH#9). Measured at the source instead.
+    const dir = join(root, 'Builds', 'linux');
+    mkdirSync(dir, { recursive: true });
+    const exe = join(dir, 'Game.x86_64');
+    writeFileSync(exe, '#!/bin/sh\nsleep 30\n');
+    chmodSync(exe, 0o755);
+    expect(await runPlayerProcess(exe, [], 150)).toMatchObject({ timedOut: true, completed: false });
+    // …and a player that exits on its own did complete, whatever its code.
+    writeFileSync(exe, '#!/bin/sh\nexit 42\n');
+    chmodSync(exe, 0o755);
+    expect(await runPlayerProcess(exe, [], 10_000)).toEqual({ exitCode: 42, timedOut: false, completed: true });
+    // A binary that cannot be spawned completed nothing either.
+    expect(await runPlayerProcess(join(dir, 'absent'), [], 10_000)).toMatchObject({ completed: false, exitCode: -1 });
+  });
+
+  it('composes what was measured: a timeout, a session played under another index, an absent catalogue', () => {
+    const verdict = (record: Record<string, unknown> | null) => ({ record, ok: true } as never);
+    const read = (text: string) => JSON.parse(/```strada-evidence\n([\s\S]*?)\n```/.exec(text)![1]!) as Record<string, unknown>;
+
+    // A player killed at the deadline. The end-to-end deadline is minutes
+    // long, so the composition is measured here.
+    const killed = read(playerReceipt({ runId: 'r' }, root, join(root, 'nothing'), { exitCode: -1, timedOut: true, completed: false }, verdict(null)));
+    expect(killed['execution']).toEqual({ completed: false, exitCode: -1, timedOut: true });
+
+    // ASKED FOR 2, PLAYED 1: the receipt must say both, or the receiver
+    // cannot see the substitution.
+    const swapped = read(playerReceipt({ runId: 'r' }, root, join(root, 'nothing'), { exitCode: 0, timedOut: false, completed: true }, verdict({
+      sessionCount: 2,
+      sessions: [{ index: 1, requestedIndex: 2, identityVerified: true, startAccepted: true, phasesSeen: [], actions: 3, outcome: 'Won', reachedOutcome: true, seconds: 2 }],
+    })));
+    expect(swapped['sessions']).toEqual([
+      { requestedIndex: 2, index: 1, identityVerified: true, actions: 3, outcome: 'Won', reachedOutcome: true, seconds: 2 },
+    ]);
+
+    // A game that registers no catalog reports -1; the receipt claims no
+    // catalogue at all rather than a negative one.
+    const noCatalog = read(playerReceipt({ runId: 'r' }, root, join(root, 'nothing'), { exitCode: 0, timedOut: false, completed: true }, verdict({ sessionCount: -1 })));
+    expect(noCatalog['target']).toBeUndefined();
+    expect(noCatalog['sessionCount']).toBeUndefined();
+    expect(read(playerReceipt({ runId: 'r' }, root, join(root, 'nothing'), { exitCode: 0, timedOut: false, completed: true }, verdict({ sessionCount: 0 })))['sessionCount']).toBe(0);
+  });
+
+  it('says nothing at all when no run id was issued', async () => {
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', identified);
+    const result = await new RunPlayerTool().execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+    expect(result.content).not.toContain('strada-evidence');
   });
 });
