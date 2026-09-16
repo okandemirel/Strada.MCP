@@ -346,7 +346,14 @@ describe('the emitted play-through test', () => {
       's.contentFingerprint = ContentFingerprint()',
       'static string ContentFingerprint()',
       'SceneManager.GetActiveScene()',
-      'Time.realtimeSinceStartup + SessionReadySeconds',
+      // ONE BUDGET PER SESSION: waiting for identity and playing share the
+      // allowance the document stated, instead of a separate five-second
+      // identity limit that marked a legitimate six-second load permanently
+      // unverified (Codex 2026-09-13 AI#4) — and the timeout says so by name.
+      'var sessionDeadline = Time.realtimeSinceStartup + deadlineSeconds;',
+      'if (Time.realtimeSinceStartup >= sessionDeadline) { readyTimedOut = true; break; }',
+      'var playDeadline = sessionDeadline;',
+      'never became active within its ',
       // The outcome contract reaches the RUNNER, not only the judge (AH#1).
       'STRADA_PLAYTHROUGH_OUTCOME_REQUIRED',
       'if (outcomeRequired)',
@@ -489,7 +496,13 @@ describe('an adopted session whose content nobody could identify', () => {
       'GameBootstrapper.Services.TryGet(out active)',
       's.identityVerified = observed == s.requestedIndex',
       'public int requestedIndex;',
-      'public int observedIndex;',
+      // ABSENCE HAS ITS OWN VALUE: a plain int defaults to zero, and zero is
+      // the contract's "no session is running", so a game that registers no
+      // IActiveSession reported an accepted identity and no session at once
+      // (Codex 2026-09-13 AI#7).
+      'public int observedIndex = -1;',
+      's.observedIndex = active != null ? observed : -1;',
+      's.observedIndex = activeNow != null ? running : -1;',
       // …and for a session the test STARTED itself: accepting our own
       // request as proof let a driver that clamps StartSession(7) to level 1
       // certify level 7 (Codex 2026-09-12 Z#6).

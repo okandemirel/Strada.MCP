@@ -248,6 +248,27 @@ describe('the evidence receipt', () => {
     expect(await runPlayerProcess(join(dir, 'absent'), [], 10_000)).toMatchObject({ completed: false, exitCode: -1 });
   });
 
+  it('an ABSENT observation is not a zero one (Codex 2026-09-13 AI#7)', () => {
+    // A game that registers no IActiveSession has nothing to observe the
+    // session; the runner says so with a negative index. Carrying that as
+    // zero made the receipt claim "identity accepted" and "no session
+    // running" at once, which every receiver read as a contradiction.
+    const verdict = (sessions: unknown) => ({ record: { sessionCount: 1, sessions }, ok: true } as never);
+    const read = (text: string) => JSON.parse(/```strada-evidence\n([\s\S]*?)\n```/.exec(text)![1]!) as Record<string, unknown>;
+    const session = (observedIndex: number) => [{
+      index: 1, requestedIndex: 1, observedIndex, identityVerified: true, identitySource: 'start-acceptance',
+      startAccepted: true, phasesSeen: ['Playing'], actions: 7, outcome: 'Won', reachedOutcome: true, seconds: 3,
+    }];
+    const process_ = { exitCode: 0, timedOut: false, completed: true };
+
+    const unobserved = read(playerReceipt({ runId: 'r' }, root, join(root, 'nothing'), process_, verdict(session(-1))));
+    expect((unobserved['sessions'] as Array<Record<string, unknown>>)[0]).not.toHaveProperty('observedIndex');
+    // …and a service that DID report zero — no session running — is carried,
+    // because that is an observation (Codex 2026-09-12 AA#3).
+    const reportedZero = read(playerReceipt({ runId: 'r' }, root, join(root, 'nothing'), process_, verdict(session(0))));
+    expect((reportedZero['sessions'] as Array<Record<string, unknown>>)[0]!['observedIndex']).toBe(0);
+  });
+
   it('composes what was measured: a timeout, a session played under another index, an absent catalogue', () => {
     const verdict = (record: Record<string, unknown> | null) => ({ record, ok: true } as never);
     const read = (text: string) => JSON.parse(/```strada-evidence\n([\s\S]*?)\n```/.exec(text)![1]!) as Record<string, unknown>;

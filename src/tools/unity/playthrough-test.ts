@@ -158,7 +158,10 @@ public class ${PLAYTHROUGH_TEST_CLASS}
         // WHERE the identity came from: "active-session", "start-acceptance"
         // or "unverified" (Codex 2026-09-12 AC J1).
         public string identitySource = "unverified";
-        public int observedIndex;
+        // The index the game REPORTED as active, or -1 when nothing observed
+        // it: zero is the contract's "no session is running", so a game with
+        // no IActiveSession claimed both at once (Codex 2026-09-13 AI#7).
+        public int observedIndex = -1;
         // What the RUNNER saw of the content, independently of the game's own
         // claim about which session it started (Codex 2026-09-13 AG#1).
         public string contentFingerprint;
@@ -214,7 +217,6 @@ public class ${PLAYTHROUGH_TEST_CLASS}
     const int MaxFramesPerSession = 12;
     // How long to wait for the session we asked for to become active: an
     // asynchronous load takes more than one frame (Codex 2026-09-13 AG#4).
-    const float SessionReadySeconds = 5f;
     static int capturingSession;
     static int sessionFrames;
 
@@ -363,7 +365,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                         try { observed = active.ActiveSession; }
                         catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[ActiveSession] " + e.GetType().Name + ": " + e.Message); }
                     }
-                    s.observedIndex = observed;
+                    s.observedIndex = active != null ? observed : -1;
                     // A PRESENT SERVICE REPORTING ZERO means NO session is
                     // running — the contract says so — and reading that as
                     // "cannot tell" verified the session we hoped for (Codex
@@ -387,6 +389,13 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                 if (si == 0) Mirror(record, s);
                 yield return null;
                 if (!s.startAccepted) { s.outcome = "None"; if (si == 0) Mirror(record, s); break; }
+                // THE SESSION'S OWN ALLOWANCE, from the moment it was
+                // accepted: waiting for identity and playing share ONE budget,
+                // the one the document stated. A separate five-second identity
+                // limit marked a legitimate session whose asynchronous load
+                // took six seconds permanently unverified (Codex 2026-09-13
+                // AI#4).
+                var sessionDeadline = Time.realtimeSinceStartup + deadlineSeconds;
                 // WHAT IS ACTUALLY RUNNING, asked after the session is under
                 // way — for a session this test started too. Accepting our own
                 // request as proof let a driver that clamps StartSession(7) to
@@ -400,19 +409,25 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     {
                         // A LOAD MAY TAKE MORE THAN ONE FRAME (Codex
                         // 2026-09-13 AG#4): the requested session is waited
-                        // for, briefly; anything else is believed at once.
-                        var readyDeadline = Time.realtimeSinceStartup + SessionReadySeconds;
+                        // for within the session's own allowance; anything
+                        // else is believed at once.
+                        var readyTimedOut = false;
                         while (true)
                         {
                             try { running = activeNow.ActiveSession; }
                             catch (Exception e) { if (record.errors.Count < 20) record.errors.Add("[ActiveSession] " + e.GetType().Name + ": " + e.Message); break; }
                             if (running == s.requestedIndex) break;
                             if (running != 0) break;
-                            if (Time.realtimeSinceStartup >= readyDeadline) break;
+                            if (Time.realtimeSinceStartup >= sessionDeadline) { readyTimedOut = true; break; }
                             yield return null;
                         }
+                        if (readyTimedOut && record.errors.Count < 20)
+                        {
+                            record.errors.Add("[ActiveSession] session " + s.requestedIndex + " never became active within its "
+                                + deadlineSeconds.ToString("0.#") + " s allowance");
+                        }
                     }
-                    s.observedIndex = running;
+                    s.observedIndex = activeNow != null ? running : -1;
                     // A PRESENT SERVICE REPORTING ZERO is no session running,
                     // not "cannot tell": accepting it verified a session the
                     // game had not started (Codex 2026-09-12 AA#3). Only a
@@ -425,7 +440,7 @@ public class ${PLAYTHROUGH_TEST_CLASS}
                     if (running > 0) s.index = running;
                 }
 
-                var playDeadline = Time.realtimeSinceStartup + deadlineSeconds;
+                var playDeadline = sessionDeadline;
                 var playStarted = Time.realtimeSinceStartup;
                 var last = "";
                 var skipDelta = true; // the first delta belongs to StartSession's frame

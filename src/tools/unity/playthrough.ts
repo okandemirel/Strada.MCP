@@ -117,7 +117,14 @@ export interface SessionRecord {
    * (Codex 2026-09-12 AC J1). Absent on older records.
    */
   identitySource?: 'active-session' | 'start-acceptance' | 'unverified';
-  /** The index the game reported as active, when it can report one. */
+  /**
+   * The index the game reported as active, when something observed it.
+   *
+   * Negative (or absent) means NOBODY observed it — the game registers no
+   * IActiveSession. Zero is the contract's "no session is running", which is
+   * an observation, and conflating the two made a correct game without the
+   * identity service contradict itself (Codex 2026-09-13 AI#7).
+   */
   observedIndex?: number;
   /**
    * What the RUNNER saw of the loaded content, independently of the game's own
@@ -146,7 +153,10 @@ export function receiptSessions(record: PlaythroughRecord | null): ReceiptSessio
     out.push({
       requestedIndex: s.requestedIndex,
       index: s.index,
-      ...(typeof s.observedIndex === 'number' ? { observedIndex: s.observedIndex } : {}),
+      // AN ABSENT OBSERVATION IS NOT A ZERO ONE (AI#7): a negative index is
+      // the runner saying nothing observed the session, so the receipt carries
+      // no observation rather than "no session was running".
+      ...(typeof s.observedIndex === 'number' && s.observedIndex >= 0 ? { observedIndex: s.observedIndex } : {}),
       identityVerified: s.identityVerified,
       ...(s.identitySource === undefined ? {} : { identitySource: s.identitySource }),
       actions: s.actions,
