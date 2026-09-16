@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { findPlayerExecutable, newestArtifact, playerReceipt, runPlayerProcess, RunPlayerTool, PLAYER_CAPTURE_SUBDIR } from './run-player.js';
+import { countRequestedSessions, findPlayerExecutable, newestArtifact, playerReceipt, playRunBudgetMs, runPlayerProcess, sessionsThatFit, RunPlayerTool, PLAYER_CAPTURE_SUBDIR, PLAY_RUN_BUDGET_MS } from './run-player.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 import { artifactDigest } from '../../evidence/producer-receipt.js';
 
@@ -165,6 +165,63 @@ describe('a failing exit invalidates the verdict', () => {
     ) as { ok: boolean; reasons: string[] };
     expect(written.ok).toBe(false);
     expect(written.reasons.join(' ')).toContain('the player exited 42');
+  });
+});
+
+/**
+ * ONE BUDGET, BOTH SIDES (Codex 2026-09-13 AJ#1).
+ *
+ * The run computed its deadline from the sessions and the document's session
+ * length — twelve 150-second rounds need over half an hour — while the caller
+ * abandoned the call after fifteen minutes. A game behaving exactly as its
+ * document specifies could not be verified at all, and the abandoned player
+ * kept running.
+ */
+describe('the run budget the caller waits for', () => {
+  it('is the budget this tool advertises', () => {
+    expect(new RunPlayerTool().metadata.timeoutMs).toBe(PLAY_RUN_BUDGET_MS);
+  });
+
+  it('counts the sessions a spec asks for the way the runner does', () => {
+    expect(countRequestedSessions(undefined)).toBe(1);
+    expect(countRequestedSessions('')).toBe(1);
+    expect(countRequestedSessions('all')).toBe(12);
+    expect(countRequestedSessions('1-5')).toBe(5);
+    expect(countRequestedSessions('2,5')).toBe(2);
+    expect(countRequestedSessions('3')).toBe(1);
+    expect(countRequestedSessions('1-100')).toBe(12);
+    expect(countRequestedSessions('nonsense')).toBe(1);
+  });
+
+  it('a request that needs longer than one run is REFUSED with the batch that fits', async () => {
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    // Twelve rounds of six minutes each: 72 minutes of play, and one run may
+    // take 45. Nothing is played, and the message names the batch.
+    const refused = await new RunPlayerTool().execute(
+      { sessions: 'all', deadlineSeconds: 360 },
+      { projectPath: root } as never,
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toContain('one run may take');
+    expect(refused.content).toContain('Ask for sessions "1-7"');
+    expect(refused.content).toContain('nothing was played');
+    // …and the batch it names does run.
+    const fits = await new RunPlayerTool().execute(
+      { sessions: '1-7', deadlineSeconds: 360 },
+      { projectPath: root } as never,
+    );
+    expect(fits.isError).toBe(false);
+  });
+
+  it('the arithmetic agrees with itself: what fits is what does not need more', () => {
+    for (const deadline of [45, 90, 150, 360, 600]) {
+      const fits = sessionsThatFit(deadline, 30);
+      expect(playRunBudgetMs(fits, deadline, 30)).toBeLessThanOrEqual(PLAY_RUN_BUDGET_MS);
+      expect(playRunBudgetMs(fits + 1, deadline, 30)).toBeGreaterThan(PLAY_RUN_BUDGET_MS);
+    }
+    // A single session always fits, even when its own allowance is absurd:
+    // the refusal then names one session, and the run is bounded by it.
+    expect(sessionsThatFit(10_000, 30)).toBe(1);
   });
 });
 

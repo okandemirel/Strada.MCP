@@ -24,6 +24,7 @@ import type { ReceiptSession } from '../../evidence/producer-receipt.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
 import { buildPlaymodeArgs, runUnityProcess } from './playmode-verify.js';
+import { PLAY_RUN_BUDGET_MS, countRequestedSessions, playRunBudgetMs, sessionsThatFit } from './run-player.js';
 import { parseTestRun } from './nunit-results.js';
 import { resolveProjectPath } from './project-path.js';
 import { decodePngRgba, frameMetrics, motionShare, type FrameMetrics } from './png-metrics.js';
@@ -678,7 +679,7 @@ export class PlaythroughTool implements ITool {
       readOnly: false,
       requiredBridgeMethods: [],
       requiredBridgeCapabilities: [],
-      timeoutMs: 600_000,
+      timeoutMs: PLAY_RUN_BUDGET_MS,
     };
   }
 
@@ -737,7 +738,24 @@ export class PlaythroughTool implements ITool {
       if (input['outcomeRequired'] === true) env['STRADA_PLAYTHROUGH_OUTCOME_REQUIRED'] = '1';
       if (typeof input['bootDeadlineSeconds'] === 'number') env['STRADA_PLAYTHROUGH_BOOT_DEADLINE_S'] = String(Math.floor(input['bootDeadlineSeconds']));
 
-      const ran = await runUnityProcess(editor.binary, args, 580_000, env);
+      // THE BUDGET THIS RUN NEEDS, not a fixed ten minutes: the editor was
+      // killed at 580 s however many sessions and however long a round the
+      // caller asked for, so a correct game with long rounds could not be
+      // played to the end (Codex 2026-09-13 AJ#1).
+      const sessionsAsked = countRequestedSessions(input['sessions']);
+      const deadlineAsked = typeof input['deadlineSeconds'] === 'number' ? Math.floor(input['deadlineSeconds']) : 45;
+      const bootAsked = typeof input['bootDeadlineSeconds'] === 'number' ? Math.floor(input['bootDeadlineSeconds']) : 30;
+      const needsMs = playRunBudgetMs(sessionsAsked, deadlineAsked, bootAsked);
+      if (needsMs > PLAY_RUN_BUDGET_MS) {
+        const fits = sessionsThatFit(deadlineAsked, bootAsked);
+        return {
+          content:
+            `Error: ${sessionsAsked} session(s) at ${deadlineAsked} s each need ${Math.round(needsMs / 1000)} s, and one run may take `
+            + `${Math.round(PLAY_RUN_BUDGET_MS / 1000)} s — nothing was played. Ask for sessions "1-${fits}" and accumulate the batches.`,
+          isError: true,
+        };
+      }
+      const ran = await runUnityProcess(editor.binary, args, needsMs, env);
       const exitCode = ran.exitCode;
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const outcome = existsSync(resultsPath) ? parseTestRun(readFileSync(resultsPath, 'utf8')) : null;

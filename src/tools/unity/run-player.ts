@@ -99,6 +99,52 @@ export interface PlayerProcessOutcome {
   readonly completed: boolean;
 }
 
+/**
+ * THE MOST WALL-CLOCK ONE RUN MAY TAKE — the same number this tool's metadata
+ * advertises, so the caller's wait and the run's own budget cannot disagree.
+ *
+ * They did: the run computed its own deadline from the sessions and the
+ * document's session length (twelve 150-second rounds need over half an hour)
+ * while the caller abandoned the call after fifteen minutes, so a game that
+ * was behaving exactly as its document specifies could not be verified at all
+ * (Codex 2026-09-13 AJ#1). A request that needs more than this is REFUSED
+ * with the batch that fits, never silently abandoned.
+ */
+export const PLAY_RUN_BUDGET_MS = 45 * 60 * 1000;
+
+/** What a run of `sessions` needs, at the allowances it was given. */
+export function playRunBudgetMs(sessions: number, deadlineSeconds: number, bootSeconds: number): number {
+  return (bootSeconds + 15 + Math.max(1, sessions) * (deadlineSeconds + 5)) * 1000 + 30_000;
+}
+
+/** How many sessions of this length fit ONE run's budget (at least one). */
+export function sessionsThatFit(deadlineSeconds: number, bootSeconds: number, budgetMs = PLAY_RUN_BUDGET_MS): number {
+  const perSession = (deadlineSeconds + 5) * 1000;
+  const overhead = (bootSeconds + 15) * 1000 + 30_000;
+  return Math.max(1, Math.floor((budgetMs - overhead) / perSession));
+}
+
+/**
+ * How many sessions a `sessions` spec asks for — the same reading the runner
+ * makes: "all" is every session the catalogue holds, bounded by one run's cap.
+ */
+export function countRequestedSessions(spec: unknown, cap = MAX_SESSIONS_PER_RUN): number {
+  if (typeof spec !== 'string' || spec.trim() === '') return 1;
+  const text = spec.trim().toLowerCase();
+  if (text === 'all') return cap;
+  let count = 0;
+  for (const part of text.split(',')) {
+    const range = part.trim().split('-');
+    const a = Number(range[0]);
+    if (range.length === 2 && Number.isInteger(a) && Number.isInteger(Number(range[1]))) {
+      for (let i = a; i <= Number(range[1]) && count < cap; i++) if (i >= 1) count++;
+    } else if (Number.isInteger(a) && a >= 1 && count < cap) {
+      count++;
+    }
+  }
+  return count === 0 ? 1 : Math.min(count, cap);
+}
+
 /** Spawn the player and wait for it to exit (SIGKILL at the deadline). */
 export function runPlayerProcess(executable: string, args: string[], timeoutMs: number): Promise<PlayerProcessOutcome> {
   return new Promise((resolve) => {
@@ -202,7 +248,7 @@ export class RunPlayerTool implements ITool {
       readOnly: false,
       requiredBridgeMethods: [],
       requiredBridgeCapabilities: [],
-      timeoutMs: 900_000,
+      timeoutMs: PLAY_RUN_BUDGET_MS,
     };
   }
 
@@ -247,8 +293,22 @@ export class RunPlayerTool implements ITool {
     // was refused (Codex 2026-09-13 AH#1).
     const outcomeRequired = input['outcomeRequired'] === true;
     if (outcomeRequired) args.push('-stradaPlaythroughOutcomeRequired', '1');
-    const sessionsRequested = typeof input['sessions'] === 'string' ? MAX_SESSIONS_PER_RUN : 1;
-    const timeoutMs = (boot + 15 + sessionsRequested * (deadline + 5)) * 1000 + 30_000;
+    // WHAT THIS RUN NEEDS, against what the caller will wait. A request that
+    // needs longer is refused with the batch that fits: the caller's wait and
+    // the run's budget used to disagree, so a correct game with long rounds
+    // was abandoned mid-play with no verdict at all (Codex 2026-09-13 AJ#1).
+    const sessionsRequested = countRequestedSessions(input['sessions']);
+    const needsMs = playRunBudgetMs(sessionsRequested, deadline, boot);
+    if (needsMs > PLAY_RUN_BUDGET_MS) {
+      const fits = sessionsThatFit(deadline, boot);
+      return {
+        content:
+          `Error: ${sessionsRequested} session(s) at ${deadline} s each need ${Math.round(needsMs / 1000)} s, and one run may take `
+          + `${Math.round(PLAY_RUN_BUDGET_MS / 1000)} s — nothing was played. Ask for sessions "1-${fits}" and accumulate the batches.`,
+        isError: true,
+      };
+    }
+    const timeoutMs = needsMs;
     const process_ = await runPlayerProcess(executable, args, timeoutMs);
     const exitCode = process_.exitCode;
     const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
