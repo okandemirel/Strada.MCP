@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { countRequestedSessions, findPlayerExecutable, newestArtifact, playerReceipt, playRunBudgetMs, runPlayerProcess, sessionsThatFit, RunPlayerTool, PLAYER_CAPTURE_SUBDIR, PLAY_RUN_BUDGET_MS } from './run-player.js';
@@ -303,6 +304,27 @@ describe('the evidence receipt', () => {
     expect(await runPlayerProcess(exe, [], 10_000)).toEqual({ exitCode: 42, timedOut: false, completed: true });
     // A binary that cannot be spawned completed nothing either.
     expect(await runPlayerProcess(join(dir, 'absent'), [], 10_000)).toMatchObject({ completed: false, exitCode: -1 });
+  });
+
+  it('binds the verdict FILE the reader will judge from (Codex 2026-09-13 AJ#12)', async () => {
+    // Strada.Brain judges the delivery from that file — its frame rate, its
+    // frames, its errors — and the receipt said nothing about it, so an
+    // admitted receipt authenticated no part of the measurement consumed.
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    const result = await new RunPlayerTool().execute(
+      { deadlineSeconds: 5, evidenceRunId: 'run-v1' },
+      { projectPath: root } as never,
+    );
+    const receipt = receiptOf(result.content);
+    const payload = receipt['payload'] as Record<string, unknown>;
+    expect(String(payload['verdictPath'])).toBe(join(PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'));
+    // The digest is OF THE FILE ON DISK: the reader can check what it read.
+    const onDisk = readFileSync(join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'), 'utf8');
+    expect(payload['verdictSha256']).toBe(createHash('sha256').update(onDisk).digest('hex'));
+    // …and an edited verdict no longer matches its receipt.
+    writeFileSync(join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'), onDisk.replace('"ok": true', '"ok": false'));
+    const edited = readFileSync(join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'), 'utf8');
+    expect(createHash('sha256').update(edited).digest('hex')).not.toBe(payload['verdictSha256']);
   });
 
   it('an ABSENT observation is not a zero one (Codex 2026-09-13 AI#7)', () => {

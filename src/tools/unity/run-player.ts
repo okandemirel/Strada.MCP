@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { EVIDENCE_RUN_ID_SCHEMA, evidenceRunId, renderReceipt } from '../../evidence/producer-receipt.js';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, basename } from 'node:path';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, basename, relative } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { resolveProjectPath } from './project-path.js';
 import { judgePlaythrough, receiptSessions, renderVerdict, withProcessOutcome, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
@@ -145,6 +146,27 @@ export function countRequestedSessions(spec: unknown, cap = MAX_SESSIONS_PER_RUN
   return count === 0 ? 1 : Math.min(count, cap);
 }
 
+/**
+ * A path as the READER will name it: relative to the project root.
+ *
+ * `/var` is a symlink to `/private/var` on macOS, so the lexical project root
+ * and a resolved capture path produced "../../../../private/var/..." — a path
+ * no reader could use (the same trap as the lease paths). Both sides are
+ * resolved before they are compared, and an unresolvable path keeps its
+ * lexical form.
+ */
+export function projectRelative(projectPath: string, target: string): string {
+  const real = (at: string): string => {
+    try {
+      return realpathSync(at);
+    } catch {
+      return at;
+    }
+  };
+  const rel = relative(real(projectPath), real(target));
+  return rel.startsWith('..') ? relative(projectPath, target) : rel;
+}
+
 /** Spawn the player and wait for it to exit (SIGKILL at the deadline). */
 export function runPlayerProcess(executable: string, args: string[], timeoutMs: number): Promise<PlayerProcessOutcome> {
   return new Promise((resolve) => {
@@ -174,6 +196,13 @@ export function playerReceipt(
   artifact: string,
   process_: PlayerProcessOutcome,
   verdict: PlaythroughVerdict,
+  /**
+   * The verdict FILE this run wrote, when it wrote one: the reader judges the
+   * delivery from those bytes, and a receipt that says nothing about them
+   * authenticates no part of the measurement actually consumed (Codex
+   * 2026-09-13 AJ#12).
+   */
+  verdictFile?: { readonly path: string; readonly bytes: string },
 ): string {
   const runId = dispatch.runId;
   if (runId === undefined) return '';
@@ -197,6 +226,14 @@ export function playerReceipt(
     // negative size.
     ...(typeof catalogue === 'number' && catalogue >= 0 ? { sessionCount: catalogue } : {}),
     ...(sessions === undefined ? {} : { sessions }),
+    ...(verdictFile === undefined
+      ? {}
+      : {
+        payload: {
+          verdictPath: verdictFile.path,
+          verdictSha256: createHash('sha256').update(verdictFile.bytes).digest('hex'),
+        },
+      }),
   });
 }
 
@@ -319,8 +356,14 @@ export class RunPlayerTool implements ITool {
     // nothing either (Codex 2026-09-12 Y). It goes into the verdict before
     // the file is written, so every reader sees it.
     const verdict = withProcessOutcome(judged, exitCode, true, 'player');
+    // THE BYTES THE READER WILL READ. Strada.Brain judges the delivery from
+    // this FILE — its frame rate, its frames, its errors — and the receipt
+    // said nothing about it, so an admitted receipt authenticated no part of
+    // the measurement that was actually consumed (Codex 2026-09-13 AJ#12).
+    const verdictBytes = JSON.stringify(verdict, null, 2);
+    const verdictPath = join(captureDir, PLAYTHROUGH_VERDICT_FILE);
     try {
-      writeFileSync(join(captureDir, PLAYTHROUGH_VERDICT_FILE), JSON.stringify(verdict, null, 2));
+      writeFileSync(verdictPath, verdictBytes);
     } catch {
       /* the verdict is still returned */
     }
@@ -328,6 +371,7 @@ export class RunPlayerTool implements ITool {
     const receipt = playerReceipt(
       { ...(evidenceRunId(input) === undefined ? {} : { runId: evidenceRunId(input) }), ...(label === undefined ? {} : { target: label }) },
       projectPath, artifact, process_, verdict,
+      { path: projectRelative(projectPath, verdictPath), bytes: verdictBytes },
     );
     const header =
       `Player: ${basename(artifact)} (${executable}); exit ${exitCode}` +
