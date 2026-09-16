@@ -105,6 +105,19 @@ export const RECORDING_MARKER = '.strada-recording';
  * Z#7). A directory may be cleared only when it does not exist, is empty, or
  * carries the marker a previous run left.
  */
+/**
+ * Files THIS recorder writes, and nothing else: numbered frames (with or
+ * without a session), its record and verdict, the player log and its own
+ * marker. A directory holding only these is the recorder's own, whether or
+ * not it was written by a version that stamped the marker.
+ */
+const RECORDER_OUTPUT_RE =
+  /^(?:frame_(?:s\d+_)?\d+\.png|playthrough\.json|playthrough-verdict\.json|player\.log|\.strada-recording|\.DS_Store)$/;
+
+export function isRecorderOutput(name: string): boolean {
+  return RECORDER_OUTPUT_RE.test(name);
+}
+
 export function prepareCaptureDir(dir: string): { ok: true } | { ok: false; reason: string } {
   if (existsSync(dir)) {
     let entries: string[];
@@ -114,7 +127,15 @@ export function prepareCaptureDir(dir: string): { ok: true } | { ok: false; reas
       return { ok: false, reason: `${dir} cannot be read (${String(error)}); nothing was written or removed` };
     }
     const ours = entries.includes(RECORDING_MARKER);
-    if (entries.length > 0 && !ours) {
+    // A DIRECTORY THAT HOLDS ONLY THIS RECORDER'S OWN OUTPUT IS THIS
+    // RECORDER'S. The marker was introduced after runs had already written
+    // here, so every play-through on an existing project was refused before
+    // it started — "holds files this recorder did not write" about frames the
+    // recorder itself had written (measured live on the vehicle 2026-09-16,
+    // from Codex 2026-09-12 Z#7). Adopting is safe because the shapes below
+    // are ours alone; anything else still stops the run.
+    const adoptable = entries.length > 0 && !ours && entries.every(isRecorderOutput);
+    if (entries.length > 0 && !ours && !adoptable) {
       return {
         ok: false,
         reason:

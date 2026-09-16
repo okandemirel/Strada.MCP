@@ -2,11 +2,11 @@
  * `captureDir: "."` deleted the project. These are the inputs Codex ran
  * (2026-09-12 U#F7, X): the runner cleared whatever the caller named.
  */
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { prepareCaptureDir, resolveCaptureDir, RECORDING_MARKER } from './capture-dir.js';
+import { isRecorderOutput, prepareCaptureDir, resolveCaptureDir, RECORDING_MARKER } from './capture-dir.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
@@ -128,5 +128,51 @@ describe('the recorder clears only what it owns', () => {
     const empty = join(root, 'Recordings', 'run-2');
     mkdirSync(empty, { recursive: true });
     expect(prepareCaptureDir(empty).ok).toBe(true);
+  });
+});
+
+/**
+ * Measured live on the vehicle, 2026-09-16: every play-through was refused
+ * before it started — "Recordings/playthrough holds files this recorder did
+ * not write (no .strada-recording)" — about frames the recorder itself had
+ * written, before the marker existed (from Codex 2026-09-12 Z#7).
+ */
+describe('a directory holding only this recorder\'s own output is adopted', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'adopt-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('adopts frames and records written before the marker existed', () => {
+    const run = join(dir, 'Recordings', 'playthrough');
+    mkdirSync(run, { recursive: true });
+    writeFileSync(join(run, 'frame_00000.png'), 'x');
+    writeFileSync(join(run, 'frame_s01_00007.png'), 'x');
+    writeFileSync(join(run, 'playthrough.json'), '{}');
+    writeFileSync(join(run, 'playthrough-verdict.json'), '{}');
+    writeFileSync(join(run, 'player.log'), 'log');
+
+    expect(prepareCaptureDir(run)).toEqual({ ok: true });
+    // Adopted means CLEARED and marked, so the next run measures itself only.
+    expect(existsSync(join(run, RECORDING_MARKER))).toBe(true);
+    expect(existsSync(join(run, 'frame_00000.png'))).toBe(false);
+  });
+
+  it('still refuses a directory holding anything else', () => {
+    const run = join(dir, 'Recordings', 'mixed');
+    mkdirSync(run, { recursive: true });
+    writeFileSync(join(run, 'frame_00000.png'), 'x');
+    writeFileSync(join(run, 'MyNotes.txt'), 'do not delete me');
+    const verdict = prepareCaptureDir(run);
+    expect(verdict.ok).toBe(false);
+    expect(existsSync(join(run, 'MyNotes.txt'))).toBe(true);
+  });
+
+  it('knows which names are its own', () => {
+    for (const name of ['frame_00001.png', 'frame_s02_00013.png', 'playthrough.json', 'playthrough-verdict.json', 'player.log']) {
+      expect(isRecorderOutput(name), name).toBe(true);
+    }
+    for (const name of ['Board.unity', 'notes.md', 'frame.png', 'frame_00001.jpg', 'subdir']) {
+      expect(isRecorderOutput(name), name).toBe(false);
+    }
   });
 });
