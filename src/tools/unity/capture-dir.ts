@@ -129,17 +129,24 @@ export function prepareCaptureDir(dir: string): { ok: true } | { ok: false; reas
     } catch (error) {
       return { ok: false, reason: `${dir} cannot be read (${String(error)}); nothing was written or removed` };
     }
-    const ours = entries.includes(RECORDING_MARKER);
+    // THE MARKER IS A FILE THIS RECORDER WROTE, not a name anyone can take: a
+  // DIRECTORY called .strada-recording (or a symlink by that name) claimed
+  // ownership of a folder full of a person's assets, and the clear below
+  // deleted all of it (Strada.Brain Codex round 8 #23).
   // NAMES ARE NOT TYPES: a directory named player-run.json holding a
   // person's assets matched the recorder's own output by name and was
-  // adopted and cleared (Strada.Brain Codex round 7 #23). Marker-less
-  // adoption needs every entry to be a regular FILE with a recorder name.
+  // adopted and cleared (Strada.Brain Codex round 7 #23). Ownership and
+  // adoption both need REGULAR FILES — never a directory or a symlink
+  // wearing a recorder's name (round 8 #23).
   let regularFiles: Set<string>;
   try {
-    regularFiles = new Set(readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name));
+    regularFiles = new Set(
+      readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && !e.isSymbolicLink()).map((e) => e.name),
+    );
   } catch (error) {
     return { ok: false, reason: `${dir} cannot be read (${String(error)}); nothing was written or removed` };
   }
+  const ours = regularFiles.has(RECORDING_MARKER);
     // A DIRECTORY THAT HOLDS ONLY THIS RECORDER'S OWN OUTPUT IS THIS
     // RECORDER'S. The marker was introduced after runs had already written
     // here, so every play-through on an existing project was refused before

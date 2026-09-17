@@ -199,3 +199,31 @@ describe('marker-less adoption needs regular files (Strada.Brain round 7 #23)', 
     }
   });
 });
+
+describe('the marker must be a regular file (Strada.Brain round 8 #23)', () => {
+  it('a DIRECTORY named .strada-recording does not authorise deleting the folder', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'capture-marker-'));
+    try {
+      mkdirSync(join(dir, RECORDING_MARKER));
+      writeFileSync(join(dir, 'valuable.asset'), 'keep me');
+      const ready = prepareCaptureDir(dir);
+      expect(ready.ok).toBe(false);
+      expect(existsSync(join(dir, 'valuable.asset'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a real marker file still owns its directory (guard)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'capture-marker-ok-'));
+    try {
+      writeFileSync(join(dir, RECORDING_MARKER), '');
+      writeFileSync(join(dir, 'frame_0001.png'), 'png');
+      const ready = prepareCaptureDir(dir);
+      expect(ready.ok).toBe(true);
+      expect(existsSync(join(dir, 'frame_0001.png'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
