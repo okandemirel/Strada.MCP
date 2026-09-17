@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -216,6 +216,152 @@ describe('artifactDigest over a build manifest', () => {
       expect(artifactDigest(exe)).toMatch(/^[0-9a-f]{64}$/);
     }
   });
+
+  const HEX = /^[0-9a-f]{64}$/;
+  const manifest = (exe: string, files: string[]): void => {
+    writeFileSync(`${exe}.strada-artifact.json`, JSON.stringify({ version: 'strada-manifest-v1', files }));
+  };
+
+  it('a manifest that leaves the GAME out is not adopted: the executable\'s BYTES stay in the identity (D78)', () => {
+    const exe = layout();
+    writeFileSync(join(dir, 'linux', 'readme.txt'), 'read me');
+    manifest(exe, ['readme.txt']);
+    expect(artifactManifest(exe)).toBeUndefined();
+    const before = artifactDigest(exe);
+    expect(before).toMatch(HEX);
+    writeFileSync(exe, 'THE EXECUTABLE'); // same size, same name: only the bytes differ
+    expect(artifactDigest(exe)).not.toBe(before);
+  });
+
+  it('a manifest lists the WHOLE game beside a player, or it is not adopted (Codex D78 review #1)', () => {
+    const exe = layout();
+    writeFileSync(join(dir, 'linux', 'Game_Data', 'level1'), 'level two');
+    writeFileSync(join(dir, 'linux', 'UnityPlayer.so'), 'the runtime');
+    mkdirSync(join(dir, 'linux', 'MonoBleedingEdge', 'etc'), { recursive: true });
+    writeFileSync(join(dir, 'linux', 'MonoBleedingEdge', 'etc', 'config'), 'mono');
+    const whole = ['Game.x86_64', 'Game_Data/level0', 'Game_Data/level1', 'MonoBleedingEdge/etc/config', 'UnityPlayer.so'];
+    for (const omitted of whole) {
+      manifest(exe, whole.filter((f) => f !== omitted));
+      expect(artifactManifest(exe), `without ${omitted}`).toBeUndefined();
+    }
+    // The producer's own manifest is the whole game (guard).
+    expect(writeArtifactManifest(exe)).toEqual(whole);
+    expect(artifactManifest(exe)?.files).toEqual(whole);
+    const adopted = artifactDigest(exe);
+    expect(adopted).toMatch(HEX);
+    writeFileSync(join(dir, 'linux', 'player.log'), 'started\n');
+    expect(artifactDigest(exe)).toBe(adopted);
+    writeFileSync(join(dir, 'linux', 'Game_Data', 'level1'), 'LEVEL TWO');
+    const dataChanged = artifactDigest(exe);
+    expect(dataChanged).not.toBe(adopted);
+    writeFileSync(join(dir, 'linux', 'UnityPlayer.so'), 'THE RUNTIME');
+    expect(artifactDigest(exe)).not.toBe(dataChanged);
+    manifest(exe, whole.map((f) => f.replace(/\//g, '\\')));
+    expect(artifactManifest(exe)?.files).toEqual(whole);
+  });
+
+  it('native plugins beside a player are runtime too, and a data folder in any case is the data folder (Codex on 04dd905d #8, #9)', () => {
+    const exe = layout();
+    mkdirSync(join(dir, 'linux', 'Plugins'), { recursive: true });
+    writeFileSync(join(dir, 'linux', 'Plugins', 'native.so'), 'native code');
+    manifest(exe, ['Game.x86_64', 'Game_Data/level0']);
+    expect(artifactManifest(exe)).toBeUndefined();
+    expect(writeArtifactManifest(exe)).toEqual(['Game.x86_64', 'Game_Data/level0', 'Plugins/native.so']);
+    const adopted = artifactDigest(exe);
+    expect(adopted).toMatch(HEX);
+    writeFileSync(join(dir, 'linux', 'Plugins', 'native.so'), 'NATIVE CODE');
+    expect(artifactDigest(exe)).not.toBe(adopted);
+    const odd = join(dir, 'odd');
+    mkdirSync(join(odd, 'Game_data'), { recursive: true });
+    writeFileSync(join(odd, 'Game.x86_64'), 'the executable');
+    writeFileSync(join(odd, 'Game_data', 'level0'), 'level one');
+    writeFileSync(join(odd, 'Game.x86_64.strada-artifact.json'), JSON.stringify({ version: 'strada-manifest-v1', files: ['Game.x86_64'] }));
+    expect(artifactManifest(join(odd, 'Game.x86_64'))).toBeUndefined();
+    const walked = artifactDigest(join(odd, 'Game.x86_64'));
+    writeFileSync(join(odd, 'Game_data', 'level0'), 'LEVEL ONE');
+    expect(artifactDigest(join(odd, 'Game.x86_64'))).not.toBe(walked);
+  });
+
+  it('a declared file that is missing means no digest whatever its position in the list (Codex on 04dd905d #10)', () => {
+    const exe = layout();
+    mkdirSync(join(dir, 'elsewhere'), { recursive: true });
+    writeFileSync(join(dir, 'elsewhere', 'other.bin'), 'other build');
+    symlinkSync(join(dir, 'elsewhere', 'other.bin'), join(dir, 'linux', 'escape.bin'));
+    manifest(exe, ['escape.bin', 'missing.bin']);
+    expect(artifactDigest(exe)).toBeUndefined();
+    manifest(exe, ['missing.bin', 'escape.bin']);
+    expect(artifactDigest(exe)).toBeUndefined();
+  });
+
+  it('an Android player is its .apk WITH the expansion file beside it (Codex round 3 #4)', () => {
+    const android = join(dir, 'android');
+    mkdirSync(android, { recursive: true });
+    writeFileSync(join(android, 'Game.apk'), 'the apk');
+    writeFileSync(join(android, 'Game.main.obb'), 'the data');
+    const apk = join(android, 'Game.apk');
+    const walked = artifactDigest(apk);
+    expect(walked).toMatch(HEX);
+    writeFileSync(join(android, 'Game.main.obb'), 'THE DATA');
+    expect(artifactDigest(apk)).not.toBe(walked);
+    writeFileSync(join(android, 'Game.apk.strada-artifact.json'), JSON.stringify({ version: 'strada-manifest-v1', files: ['Game.apk'] }));
+    expect(artifactManifest(apk)).toBeUndefined();
+    writeFileSync(join(android, 'Game.apk.strada-artifact.json'), JSON.stringify({ version: 'strada-manifest-v1', files: ['Game.apk', 'Game.main.obb'] }));
+    expect(artifactManifest(apk)?.files).toEqual(['Game.apk', 'Game.main.obb']);
+  });
+
+  it('nothing outside the layout: a symlink to another build refuses the manifest', () => {
+    const exe = layout();
+    mkdirSync(join(dir, 'elsewhere'), { recursive: true });
+    writeFileSync(join(dir, 'elsewhere', 'other.bin'), 'other build');
+    symlinkSync(join(dir, 'elsewhere', 'other.bin'), join(dir, 'linux', 'escape.bin'));
+    manifest(exe, ['Game.x86_64', 'Game_Data/level0', 'escape.bin']);
+    expect(artifactManifest(exe)).toBeUndefined();
+    expect(artifactDigest(exe)).toMatch(HEX);
+  });
+
+  it('a declared file the tree does not have means NO digest, not a walk of what is left (Codex D78 review #5)', () => {
+    const exe = layout();
+    manifest(exe, ['Game.x86_64', 'missing.bin']);
+    expect(artifactDigest(exe)).toBeUndefined();
+  });
+
+  it('a bundle\'s manifest lists the bundle in full: a decoy beside the binary is not the binary (Codex D78 review #2)', () => {
+    const app = join(dir, 'mac', 'Game.app');
+    mkdirSync(join(app, 'Contents', 'MacOS'), { recursive: true });
+    mkdirSync(join(app, 'Contents', 'Resources', 'Data'), { recursive: true });
+    writeFileSync(join(app, 'Contents', 'MacOS', 'Game'), 'mach-o');
+    writeFileSync(join(app, 'Contents', 'MacOS', 'readme.txt'), 'decoy');
+    writeFileSync(join(app, 'Contents', 'Info.plist'), '<plist/>');
+    writeFileSync(join(app, 'Contents', 'Resources', 'Data', 'level0'), 'level one');
+    const full = ['Game.app/Contents/Info.plist', 'Game.app/Contents/MacOS/Game', 'Game.app/Contents/MacOS/readme.txt', 'Game.app/Contents/Resources/Data/level0'];
+    manifest(app, full.filter((f) => !f.endsWith('/Game')));
+    expect(artifactManifest(app)).toBeUndefined();
+    expect(writeArtifactManifest(app)).toEqual(full);
+    expect(artifactManifest(app)?.files).toEqual(full);
+    const adopted = artifactDigest(app);
+    expect(adopted).toMatch(HEX);
+    writeFileSync(join(dir, 'mac', 'Player.log'), 'ran');
+    expect(artifactDigest(app)).toBe(adopted);
+    writeFileSync(join(app, 'Contents', 'MacOS', 'Game'), 'MACH-O');
+    expect(artifactDigest(app)).not.toBe(adopted);
+  });
+
+  it('a WebGL player is index.html WITH its Build folder (Codex D78 review #3)', () => {
+    const web = join(dir, 'web');
+    mkdirSync(join(web, 'Build'), { recursive: true });
+    writeFileSync(join(web, 'index.html'), '<html/>');
+    writeFileSync(join(web, 'Build', 'game.wasm'), 'wasm bytes');
+    const page = join(web, 'index.html');
+    const walked = artifactDigest(page);
+    expect(walked).toMatch(HEX);
+    writeFileSync(join(web, 'Build', 'game.wasm'), 'WASM BYTES');
+    expect(artifactDigest(page)).not.toBe(walked);
+    manifest(page, ['index.html']);
+    expect(artifactManifest(page)).toBeUndefined();
+    expect(writeArtifactManifest(page)).toEqual(['Build/game.wasm', 'index.html']);
+    expect(artifactManifest(page)?.files).toEqual(['Build/game.wasm', 'index.html']);
+  });
+
 
   it('never lists itself', () => {
     const exe = layout();
