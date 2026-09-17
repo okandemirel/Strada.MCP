@@ -22,6 +22,10 @@ export interface ToolResult {
   metadata?: {
     executionTimeMs?: number;
     filesAffected?: string[];
+    /** How a producer's process ended, for a reader that must not parse it out of prose. */
+    exitCode?: number;
+    timedOut?: boolean;
+    completed?: boolean;
   };
 }
 

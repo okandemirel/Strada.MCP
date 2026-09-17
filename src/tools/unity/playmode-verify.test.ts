@@ -1,4 +1,7 @@
-import { runUnityProcess, suiteReceipt } from './playmode-verify.js';
+import { runUnityProcess, suiteReceipt, PlaymodeVerifyTool, type UnityProcessOutcome } from './playmode-verify.js';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 describe('the PlayMode run record (2026-09-10)', () => {
   it('is written from the NUnit counts and the call arguments, with unfiltered a fact of the call', async () => {
@@ -87,5 +90,55 @@ describe('runUnityProcess measures how the editor ended', () => {
     expect(await runUnityProcess('/bin/sh', ['-c', 'exit 0'], 10_000)).toEqual({ exitCode: 0, timedOut: false, completed: true });
     // A binary that cannot be spawned completed nothing.
     expect(await runUnityProcess('/nonexistent/unity', [], 10_000)).toMatchObject({ completed: false, exitCode: -1 });
+  });
+});
+
+/**
+ * Codex 2026-09-17 (on Strada.Brain 7cb9d8a3 #2): the verdict judged the
+ * NUnit file alone — an editor that wrote a green file and then exited 1, or
+ * was killed at its allowance, was "N of N tests ran clean", isError: false.
+ */
+describe('unity_playmode_verify and how the editor ended', () => {
+  const GREEN_XML = '<?xml version="1.0"?><test-run id="2" testcasecount="1" result="Passed" total="1" passed="1" failed="0" skipped="0"><test-case name="Boots" fullname="A.Boots" result="Passed"/></test-run>';
+  const prevEditor = process.env['UNITY_EDITOR_PATH'];
+  let project = '';
+  afterEach(() => {
+    if (project) rmSync(project, { recursive: true, force: true });
+    if (prevEditor === undefined) delete process.env['UNITY_EDITOR_PATH']; else process.env['UNITY_EDITOR_PATH'] = prevEditor;
+  });
+  /** The tool with its only process seam stubbed: Unity "writes" a green file, then ends as told. */
+  const run = async (outcome: UnityProcessOutcome) => {
+    project = mkdtempSync(join(tmpdir(), 'pmv-exit-'));
+    mkdirSync(join(project, 'Assets'), { recursive: true });
+    process.env['UNITY_EDITOR_PATH'] = '/bin/sh'; // only access()ed; runUnity is stubbed
+    const tool = new PlaymodeVerifyTool();
+    (tool as unknown as { runUnity: (b: string, args: string[], t: number) => Promise<UnityProcessOutcome> }).runUnity = async (_b, args) => {
+      writeFileSync(args[args.indexOf('-testResults') + 1]!, GREEN_XML);
+      writeFileSync(args[args.indexOf('-logFile') + 1]!, 'Compilation succeeded\n');
+      return outcome;
+    };
+    return tool.execute({ projectPath: project }, { projectPath: project } as never);
+  };
+
+  it('a green results file followed by exit 1 is NOT a pass, and says so in prose and metadata', async () => {
+    const r = await run({ exitCode: 1, timedOut: false, completed: true });
+    expect(r.isError).toBe(true);
+    expect(r.content).not.toMatch(/ran clean/);
+    expect(r.content).toMatch(/FAILED: every test case passed, but the editor exited 1/);
+    expect(r.metadata).toMatchObject({ exitCode: 1, timedOut: false, completed: true });
+  });
+
+  it('a green results file from an editor killed at its allowance is NOT a pass', async () => {
+    const r = await run({ exitCode: -1, timedOut: true, completed: false });
+    expect(r.isError).toBe(true);
+    expect(r.content).toMatch(/killed at its allowance/);
+    expect(r.metadata).toMatchObject({ exitCode: -1, timedOut: true, completed: false });
+  });
+
+  it('exit 0 with a green file is the pass it says it is (guard)', async () => {
+    const r = await run({ exitCode: 0, timedOut: false, completed: true });
+    expect(r.isError).toBe(false);
+    expect(r.content).toMatch(/1 of 1 tests ran clean/);
+    expect(r.metadata).toMatchObject({ exitCode: 0 });
   });
 });

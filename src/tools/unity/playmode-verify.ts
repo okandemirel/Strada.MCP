@@ -253,7 +253,7 @@ export class PlaymodeVerifyTool implements ITool {
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
 
       if (!existsSync(resultsPath)) {
-        return { content: this.renderNoResults(exitCode, log), isError: true };
+        return { content: this.renderNoResults(exitCode, log), isError: true, metadata: { exitCode, timedOut: ran.timedOut, completed: ran.completed } };
       }
 
       const xml = readFileSync(resultsPath, 'utf8');
@@ -264,11 +264,26 @@ export class PlaymodeVerifyTool implements ITool {
             `PlayMode run wrote a results file with no <test-run> element (Unity exit ${exitCode}). ` +
             `First lines:\n${xml.slice(0, 400)}`,
           isError: true,
+          metadata: { exitCode, timedOut: ran.timedOut, completed: ran.completed },
         };
       }
 
       const exceptions = this.playModeExceptions(log);
-      const verdict = playmodeVerdict(outcome, exceptions);
+      // A PROCESS THAT DIED IS NOT A RUN THAT PASSED — the play-through's
+      // rule (withProcessOutcome), never applied here: an editor that wrote
+      // a green results file and then exited 1, or was killed at its
+      // allowance, was reported "ran clean" with isError: false, and
+      // Strada.Brain cleared its debts on the flag (Codex 2026-09-17 on
+      // Strada.Brain 7cb9d8a3 #2). Unity exits non-zero on failed tests by
+      // design, so a red file keeps its own reason; a green file under a
+      // dead process is the case named here.
+      const judged = playmodeVerdict(outcome, exceptions);
+      const processFailed = !ran.completed || ran.timedOut || exitCode !== 0;
+      const verdict: { passed: boolean; reason: PlaymodeReason } = judged.passed && processFailed
+        ? { passed: false, reason: 'process-failed' }
+        : judged;
+      // How the editor ended, structured: a reader must not have to parse it out of prose.
+      const processMetadata = { exitCode, timedOut: ran.timedOut, completed: ran.completed };
       // The run as the NUnit file states it, for whoever judges delivery: the
       // counts, the failing names, and whether a filter narrowed the suite —
       // read from the arguments, not from a word in this tool's prose.
@@ -312,11 +327,13 @@ export class PlaymodeVerifyTool implements ITool {
             // Only an empty run needs to know what the project holds; the scan
             // is cheap but a passing run has nothing to explain.
             verdict.reason === 'nothing-ran' ? findPlayModeTestAssemblies(projectPath) : undefined,
+            ran,
           ) +
           shape.suffix +
           (captureDir === null ? '' : this.renderCapture(captureDir, log)) +
           receipt,
         isError: shape.isError,
+        metadata: processMetadata,
       };
     } finally {
       try { rmSync(scratch, { recursive: true, force: true }); } catch { /* scratch */ }
@@ -458,10 +475,17 @@ export class PlaymodeVerifyTool implements ITool {
     filter?: string,
     categories?: string,
     testAssemblies?: readonly string[],
+    process_?: UnityProcessOutcome,
   ): string {
     const lines: string[] = [];
 
-    if (reason === 'nothing-ran') {
+    if (reason === 'process-failed') {
+      const ended = process_?.timedOut ? 'was killed at its allowance' : process_?.completed === false ? 'never finished' : `exited ${exitCode}`;
+      lines.push(
+        `PlayMode verification FAILED: every test case passed, but the editor ${ended} after writing the ` +
+        'results — a run that died is not a run that passed.',
+      );
+    } else if (reason === 'nothing-ran') {
       // A results file with zero tests looks the same whether the project has
       // no tests or simply failed to build them. Measured: an agent called this
       // thirteen times against a project that did not compile and was told each
@@ -627,6 +651,9 @@ export interface PlaymodeRunRecord {
   readonly exitCode: number;
   readonly reason: string;
 }
+
+/** Why a play-mode run did or did not pass; 'process-failed' is a green file under a dead editor. */
+export type PlaymodeReason = ReturnType<typeof playmodeVerdict>['reason'] | 'process-failed';
 
 /**
  * Write the record beside the project's other evidence. The delivery gate in
