@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { EVIDENCE_RUN_ID_SCHEMA, evidenceRunId, renderReceipt } from '../../evidence/producer-receipt.js';
+import { EVIDENCE_RUN_ID_SCHEMA, artifactDigest, evidenceRunId, renderReceipt } from '../../evidence/producer-receipt.js';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, basename, relative } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
@@ -139,12 +139,23 @@ export function largestDeadlineThatFits(bootSeconds: number, budgetMs = PLAY_RUN
 
 /**
  * WHAT THIS TOOL REMEMBERS ABOUT ITS LAST RUN IN A CAPTURE DIRECTORY: the
- * artifact it launched. The runner's record (playthrough.json) names the
- * game's catalogue but not the artifact it was measured on — and a catalogue
- * from another game is no basis for budgeting this one — so the artifact
- * path is written beside the record before the player starts.
+ * artifact it launched — its path AND its digest — and, once the run has
+ * reported it, the catalogue that artifact holds. The runner's record
+ * (playthrough.json) names the game's catalogue but not the artifact it was
+ * measured on — and a catalogue from another game is no basis for budgeting
+ * this one — so the artifact's identity is written beside the record before
+ * the player starts.
  */
 export const PLAYER_RUN_FILE = 'player-run.json';
+
+/** The sidecar's shape: which bytes ran, and what catalogue they reported. */
+export interface PlayerRunRecord {
+  readonly artifactPath: string;
+  /** artifactDigest() of the bytes that ran; absent when the digest could not be taken. */
+  readonly artifactSha256?: string;
+  /** The catalogue the run reported, once it has (integer >= 1). */
+  readonly sessionCount?: number;
+}
 
 /**
  * The catalogue the previous run in `captureDir` observed for `artifact`,
@@ -155,19 +166,39 @@ export const PLAYER_RUN_FILE = 'player-run.json';
  * "all" was budgeted as the producer's whole cap even when the game's
  * catalogue was three, so "all" for a long-round three-level game was refused
  * before anything ran (Codex 2026-09-17 AK#3). The tie to the artifact is the
- * path this tool launched last time — a rebuild at the same path with a
- * different catalogue is over- or under-budgeted for one run, and then the
- * new record corrects it; no artifact identity means the cap.
+ * path this tool launched last time AND the digest of the bytes it launched:
+ * bound to the path alone, a rebuild at the same path kept the old catalogue
+ * — a cached 1 rebuilt to 12 budgeted "all" as one session and the run was
+ * killed mid-play; a cached 12 rebuilt to 3 with long rounds was refused
+ * forever (Codex round 5 #10). Different bytes, or no artifact identity,
+ * mean the cap.
  */
 export function previousCatalogue(captureDir: string, artifact: string): number | undefined {
   try {
     const record = JSON.parse(readFileSync(join(captureDir, PLAYTHROUGH_RECORD_FILE), 'utf8')) as { sessionCount?: unknown };
-    const launched = JSON.parse(readFileSync(join(captureDir, PLAYER_RUN_FILE), 'utf8')) as { artifactPath?: unknown };
+    const launched = JSON.parse(readFileSync(join(captureDir, PLAYER_RUN_FILE), 'utf8')) as Partial<Record<keyof PlayerRunRecord, unknown>>;
     if (typeof launched.artifactPath !== 'string' || !samePath(launched.artifactPath, artifact)) return undefined;
-    const count = record.sessionCount;
-    return typeof count === 'number' && Number.isInteger(count) && count >= 1 ? count : undefined;
+    // THE BYTES, not only the name: the same path after a rebuild is another
+    // game, and its catalogue is unknown until it has been measured (#10).
+    if (typeof launched.artifactSha256 !== 'string' || launched.artifactSha256 !== artifactDigest(artifact)) return undefined;
+    const count = catalogueSize(launched.sessionCount) ?? catalogueSize(record.sessionCount);
+    return count;
   } catch {
     return undefined;
+  }
+}
+
+/** A catalogue size as a record may state it, or undefined when it states none. */
+function catalogueSize(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
+}
+
+/** Writes the sidecar; a failure only costs the next "all" its catalogue (budgeted as the cap). */
+function rememberPlayerRun(captureDir: string, run: PlayerRunRecord): void {
+  try {
+    writeFileSync(join(captureDir, PLAYER_RUN_FILE), JSON.stringify(run, null, 2));
+  } catch {
+    /* the next "all" is budgeted as the cap */
   }
 }
 
@@ -371,11 +402,12 @@ export class RunPlayerTool implements ITool {
     // NEVER CLEARS WHAT IT DOES NOT OWN (Codex 2026-09-12 Z#7).
     const ready = prepareCaptureDir(captureDir);
     if (!ready.ok) return { content: `Error: ${ready.reason}`, isError: true };
-    try {
-      writeFileSync(join(captureDir, PLAYER_RUN_FILE), JSON.stringify({ artifactPath: artifact }, null, 2));
-    } catch {
-      /* the next "all" is budgeted as the cap */
-    }
+    // WHICH BYTES THIS RUN LAUNCHES, taken before the player can touch its
+    // own tree: the next "all" honours the catalogue only for these bytes,
+    // not for whatever is later built at this path (round 5 #10).
+    const launchedDigest = artifactDigest(artifact);
+    const launched: PlayerRunRecord = { artifactPath: artifact, ...(launchedDigest === undefined ? {} : { artifactSha256: launchedDigest }) };
+    rememberPlayerRun(captureDir, launched);
     const jsonPath = join(captureDir, PLAYTHROUGH_RECORD_FILE);
     const logPath = join(captureDir, 'player.log');
     const deadline = typeof input['deadlineSeconds'] === 'number' ? Math.floor(input['deadlineSeconds']) : 45;
@@ -439,6 +471,9 @@ export class RunPlayerTool implements ITool {
     // the measurement that was actually consumed (Codex 2026-09-13 AJ#12).
     const verdictBytes = JSON.stringify(verdict, null, 2);
     const verdictPath = join(captureDir, PLAYTHROUGH_VERDICT_FILE);
+    // THE CATALOGUE THESE BYTES REPORTED, kept with their identity.
+    const reported = catalogueSize(verdict.record?.sessionCount);
+    if (reported !== undefined) rememberPlayerRun(captureDir, { ...launched, sessionCount: reported });
     try {
       writeFileSync(verdictPath, verdictBytes);
     } catch {

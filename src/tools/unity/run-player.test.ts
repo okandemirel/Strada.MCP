@@ -7,10 +7,11 @@
  * The run budget (Strada.Brain plan 0-B.5): a request that cannot fit is
  * refused with a way out, never with itself (Codex 2026-09-17 AK#5), and
  * "all" is the catalogue this producer last saw for the artifact, not the
- * cap (AK#3).
+ * cap (AK#3) — for the artifact's BYTES, not its path: a rebuild at the same
+ * path is budgeted as the cap until it has been measured (Codex round 5 #10).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -294,6 +295,43 @@ describe('a request that cannot fit is refused with a way out (Strada.Brain plan
     const foreign = await tool.execute({ sessions: 'all', deadlineSeconds: 300, artifactPath: other }, { projectPath: root } as never);
     expect(foreign.isError).toBe(true);
     expect(foreign.content).toContain('12 session(s) at 300 s');
+  });
+
+  it('a rebuilt artifact at the SAME path is budgeted as the cap until measured; the same bytes keep their catalogue (Codex round 5 #10)', async () => {
+    const exe = fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    const tool = new RunPlayerTool();
+    const captureDir = join(root, PLAYER_CAPTURE_SUBDIR);
+    // A run leaves the catalogue (3) bound to the bytes it launched…
+    const first = await tool.execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+    expect(first.isError).toBe(false);
+    expect(previousCatalogue(captureDir, exe)).toBe(3);
+    const sidecar = JSON.parse(readFileSync(join(captureDir, 'player-run.json'), 'utf8')) as Record<string, unknown>;
+    expect(sidecar['artifactPath']).toBe(exe);
+    expect(sidecar['artifactSha256']).toBe(artifactDigest(exe));
+    expect(sidecar['sessionCount']).toBe(3);
+    // …and the same bytes, touched but unchanged, keep it: "all" at 300 s is
+    // three sessions, which fit.
+    writeFileSync(exe, readFileSync(exe));
+    expect(previousCatalogue(captureDir, exe)).toBe(3);
+    const same = await tool.execute({ sessions: 'all', deadlineSeconds: 300 }, { projectPath: root } as never);
+    expect(same.isError).toBe(false);
+    expect(same.content).toContain('PLAY-THROUGH OK');
+    // A REBUILD AT THE SAME PATH is another game: its catalogue is unknown,
+    // so "all" is the cap again — twelve at 300 s, refused with the batch
+    // that fits — not the three the old bytes reported.
+    appendFileSync(exe, '# rebuilt: a different game at the same path\n');
+    expect(previousCatalogue(captureDir, exe)).toBeUndefined();
+    const rebuilt = await tool.execute({ sessions: 'all', deadlineSeconds: 300 }, { projectPath: root } as never);
+    expect(rebuilt.isError).toBe(true);
+    expect(rebuilt.content).toContain('12 session(s) at 300 s');
+    expect(rebuilt.content).toContain('Ask for sessions "1-8"');
+    // Once the rebuilt bytes have been measured, THEIR catalogue counts.
+    const measured = await tool.execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+    expect(measured.isError).toBe(false);
+    expect(previousCatalogue(captureDir, exe)).toBe(3);
+    // A sidecar with no digest (written before the digest was recorded) binds nothing: cap.
+    writeFileSync(join(captureDir, 'player-run.json'), JSON.stringify({ artifactPath: exe }));
+    expect(previousCatalogue(captureDir, exe)).toBeUndefined();
   });
 
   it('counts "all" as min(cap, catalogue) only when a catalogue is known', () => {
