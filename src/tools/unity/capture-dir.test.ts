@@ -183,3 +183,19 @@ describe('recorder output names (Strada.Brain round 6 #24)', () => {
     expect(isRecorderOutput('player-run.json.bak')).toBe(false);
   });
 });
+
+describe('marker-less adoption needs regular files (Strada.Brain round 7 #23)', () => {
+  it('a DIRECTORY named like recorder output is not recorder output', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'capture-adopt-'));
+    try {
+      mkdirSync(join(dir, 'player-run.json'));
+      writeFileSync(join(dir, 'player-run.json', 'valuable.asset'), 'keep me');
+      writeFileSync(join(dir, 'playthrough.json'), '{}');
+      const ready = prepareCaptureDir(dir);
+      expect(ready.ok).toBe(false);
+      expect(existsSync(join(dir, 'player-run.json', 'valuable.asset'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

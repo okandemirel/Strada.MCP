@@ -130,6 +130,16 @@ export function prepareCaptureDir(dir: string): { ok: true } | { ok: false; reas
       return { ok: false, reason: `${dir} cannot be read (${String(error)}); nothing was written or removed` };
     }
     const ours = entries.includes(RECORDING_MARKER);
+  // NAMES ARE NOT TYPES: a directory named player-run.json holding a
+  // person's assets matched the recorder's own output by name and was
+  // adopted and cleared (Strada.Brain Codex round 7 #23). Marker-less
+  // adoption needs every entry to be a regular FILE with a recorder name.
+  let regularFiles: Set<string>;
+  try {
+    regularFiles = new Set(readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name));
+  } catch (error) {
+    return { ok: false, reason: `${dir} cannot be read (${String(error)}); nothing was written or removed` };
+  }
     // A DIRECTORY THAT HOLDS ONLY THIS RECORDER'S OWN OUTPUT IS THIS
     // RECORDER'S. The marker was introduced after runs had already written
     // here, so every play-through on an existing project was refused before
@@ -137,7 +147,7 @@ export function prepareCaptureDir(dir: string): { ok: true } | { ok: false; reas
     // recorder itself had written (measured live on the vehicle 2026-09-16,
     // from Codex 2026-09-12 Z#7). Adopting is safe because the shapes below
     // are ours alone; anything else still stops the run.
-    const adoptable = entries.length > 0 && !ours && entries.every(isRecorderOutput);
+    const adoptable = entries.length > 0 && !ours && entries.every((name) => regularFiles.has(name) && isRecorderOutput(name));
     if (entries.length > 0 && !ours && !adoptable) {
       return {
         ok: false,
