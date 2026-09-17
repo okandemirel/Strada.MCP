@@ -118,21 +118,79 @@ export function playRunBudgetMs(sessions: number, deadlineSeconds: number, bootS
   return (bootSeconds + 15 + Math.max(1, sessions) * (deadlineSeconds + 5)) * 1000 + 30_000;
 }
 
-/** How many sessions of this length fit ONE run's budget (at least one). */
+/**
+ * How many sessions of this length fit ONE run's budget — ZERO when not even
+ * one does. This floored at one, so a single session whose allowance exceeds
+ * the run (an 1800 s round with headroom asks 2715 s against a 2700 s run)
+ * was refused with "ask for sessions 1-1": the same request, again, forever
+ * (Codex 2026-09-17 AK#5, Strada.Brain plan 0-B.5).
+ */
 export function sessionsThatFit(deadlineSeconds: number, bootSeconds: number, budgetMs = PLAY_RUN_BUDGET_MS): number {
   const perSession = (deadlineSeconds + 5) * 1000;
   const overhead = (bootSeconds + 15) * 1000 + 30_000;
-  return Math.max(1, Math.floor((budgetMs - overhead) / perSession));
+  return Math.max(0, Math.floor((budgetMs - overhead) / perSession));
+}
+
+/** The largest deadlineSeconds at which ONE session still fits one run (the inverse of playRunBudgetMs for one session). */
+export function largestDeadlineThatFits(bootSeconds: number, budgetMs = PLAY_RUN_BUDGET_MS): number {
+  const overhead = (bootSeconds + 15) * 1000 + 30_000;
+  return Math.floor((budgetMs - overhead) / 1000) - 5;
+}
+
+/**
+ * WHAT THIS TOOL REMEMBERS ABOUT ITS LAST RUN IN A CAPTURE DIRECTORY: the
+ * artifact it launched. The runner's record (playthrough.json) names the
+ * game's catalogue but not the artifact it was measured on — and a catalogue
+ * from another game is no basis for budgeting this one — so the artifact
+ * path is written beside the record before the player starts.
+ */
+export const PLAYER_RUN_FILE = 'player-run.json';
+
+/**
+ * The catalogue the previous run in `captureDir` observed for `artifact`,
+ * or undefined: no previous record, a record that names no catalogue, or one
+ * measured on another artifact. Read BEFORE prepareCaptureDir clears the
+ * directory.
+ *
+ * "all" was budgeted as the producer's whole cap even when the game's
+ * catalogue was three, so "all" for a long-round three-level game was refused
+ * before anything ran (Codex 2026-09-17 AK#3). The tie to the artifact is the
+ * path this tool launched last time — a rebuild at the same path with a
+ * different catalogue is over- or under-budgeted for one run, and then the
+ * new record corrects it; no artifact identity means the cap.
+ */
+export function previousCatalogue(captureDir: string, artifact: string): number | undefined {
+  try {
+    const record = JSON.parse(readFileSync(join(captureDir, PLAYTHROUGH_RECORD_FILE), 'utf8')) as { sessionCount?: unknown };
+    const launched = JSON.parse(readFileSync(join(captureDir, PLAYER_RUN_FILE), 'utf8')) as { artifactPath?: unknown };
+    if (typeof launched.artifactPath !== 'string' || !samePath(launched.artifactPath, artifact)) return undefined;
+    const count = record.sessionCount;
+    return typeof count === 'number' && Number.isInteger(count) && count >= 1 ? count : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Two paths name the same artifact, lexically or once resolved (/var vs /private/var). */
+function samePath(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * How many sessions a `sessions` spec asks for — the same reading the runner
  * makes: "all" is every session the catalogue holds, bounded by one run's cap.
+ * `catalogue` is the size this producer last observed for this artifact
+ * (previousCatalogue); unknown, "all" is budgeted as the cap (AK#3).
  */
-export function countRequestedSessions(spec: unknown, cap = MAX_SESSIONS_PER_RUN): number {
+export function countRequestedSessions(spec: unknown, cap = MAX_SESSIONS_PER_RUN, catalogue?: number): number {
   if (typeof spec !== 'string' || spec.trim() === '') return 1;
   const text = spec.trim().toLowerCase();
-  if (text === 'all') return cap;
+  if (text === 'all') return catalogue === undefined ? cap : Math.min(cap, catalogue);
   let count = 0;
   for (const part of text.split(',')) {
     const range = part.trim().split('-');
@@ -307,9 +365,17 @@ export class RunPlayerTool implements ITool {
     const decision = resolveCaptureDir(projectPath, input['captureDir'], PLAYER_CAPTURE_SUBDIR);
     if (decision.dir === undefined) return { content: `Error: ${decision.reason}`, isError: true };
     const captureDir = decision.dir;
+    // THE CATALOGUE THIS PRODUCER LAST SAW FOR THIS ARTIFACT, read before the
+    // directory is cleared: "all" is budgeted against it, not the cap (AK#3).
+    const catalogue = previousCatalogue(captureDir, artifact);
     // NEVER CLEARS WHAT IT DOES NOT OWN (Codex 2026-09-12 Z#7).
     const ready = prepareCaptureDir(captureDir);
     if (!ready.ok) return { content: `Error: ${ready.reason}`, isError: true };
+    try {
+      writeFileSync(join(captureDir, PLAYER_RUN_FILE), JSON.stringify({ artifactPath: artifact }, null, 2));
+    } catch {
+      /* the next "all" is budgeted as the cap */
+    }
     const jsonPath = join(captureDir, PLAYTHROUGH_RECORD_FILE);
     const logPath = join(captureDir, 'player.log');
     const deadline = typeof input['deadlineSeconds'] === 'number' ? Math.floor(input['deadlineSeconds']) : 45;
@@ -334,14 +400,22 @@ export class RunPlayerTool implements ITool {
     // needs longer is refused with the batch that fits: the caller's wait and
     // the run's budget used to disagree, so a correct game with long rounds
     // was abandoned mid-play with no verdict at all (Codex 2026-09-13 AJ#1).
-    const sessionsRequested = countRequestedSessions(input['sessions']);
+    const sessionsRequested = countRequestedSessions(input['sessions'], MAX_SESSIONS_PER_RUN, catalogue);
     const needsMs = playRunBudgetMs(sessionsRequested, deadline, boot);
     if (needsMs > PLAY_RUN_BUDGET_MS) {
+      // …AND NEVER WITH THE REQUEST IT JUST REFUSED: when not even one session
+      // fits, "ask for 1-1" is the same request again (AK#5). The way out is a
+      // smaller allowance, or a run that can resume.
       const fits = sessionsThatFit(deadline, boot);
+      const wayOut = fits >= 1
+        ? `Ask for sessions "1-${fits}" and accumulate the batches.`
+        : `one session at ${deadline} s does not fit one run (limit ${PLAY_RUN_BUDGET_MS / 1000} s with ${boot} s boot): `
+          + `lower deadlineSeconds to at most ${largestDeadlineThatFits(boot)} s if the round really fits that, `
+          + 'or verify this game with a resumable run — this request cannot succeed as it is';
       return {
         content:
           `Error: ${sessionsRequested} session(s) at ${deadline} s each need ${Math.round(needsMs / 1000)} s, and one run may take `
-          + `${Math.round(PLAY_RUN_BUDGET_MS / 1000)} s — nothing was played. Ask for sessions "1-${fits}" and accumulate the batches.`,
+          + `${Math.round(PLAY_RUN_BUDGET_MS / 1000)} s — nothing was played. ${wayOut}`,
         isError: true,
       };
     }

@@ -3,13 +3,18 @@
  * speaks for what a person sees. The player here is a shell script standing
  * in for the artifact: it receives the runner's arguments, writes the record
  * a real Strada.Core PlayerPlaythroughRunner would, and drops frames.
+ *
+ * The run budget (Strada.Brain plan 0-B.5): a request that cannot fit is
+ * refused with a way out, never with itself (Codex 2026-09-17 AK#5), and
+ * "all" is the catalogue this producer last saw for the artifact, not the
+ * cap (AK#3).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { countRequestedSessions, findPlayerExecutable, newestArtifact, playerReceipt, playRunBudgetMs, runPlayerProcess, sessionsThatFit, RunPlayerTool, PLAYER_CAPTURE_SUBDIR, PLAY_RUN_BUDGET_MS } from './run-player.js';
+import { countRequestedSessions, findPlayerExecutable, largestDeadlineThatFits, newestArtifact, playerReceipt, playRunBudgetMs, previousCatalogue, runPlayerProcess, sessionsThatFit, RunPlayerTool, PLAYER_CAPTURE_SUBDIR, PLAY_RUN_BUDGET_MS } from './run-player.js';
 import { encodeRgbPng } from './png-metrics.test.js';
 import { artifactDigest } from '../../evidence/producer-receipt.js';
 
@@ -220,9 +225,82 @@ describe('the run budget the caller waits for', () => {
       expect(playRunBudgetMs(fits, deadline, 30)).toBeLessThanOrEqual(PLAY_RUN_BUDGET_MS);
       expect(playRunBudgetMs(fits + 1, deadline, 30)).toBeGreaterThan(PLAY_RUN_BUDGET_MS);
     }
-    // A single session always fits, even when its own allowance is absurd:
-    // the refusal then names one session, and the run is bounded by it.
-    expect(sessionsThatFit(10_000, 30)).toBe(1);
+    // A single session whose allowance exceeds the run does NOT fit: zero,
+    // never a floor of one that the refusal would re-propose (AK#5).
+    expect(sessionsThatFit(10_000, 30)).toBe(0);
+  });
+});
+
+describe('a request that cannot fit is refused with a way out (Strada.Brain plan 0-B.5)', () => {
+  it('not even one session fits an 1800 s round with headroom (AK#5)', () => {
+    expect(sessionsThatFit(2715, 30)).toBe(0);
+    // The largest allowance one session fits is the inverse of the one-session budget.
+    const max = Math.floor((PLAY_RUN_BUDGET_MS - ((30 + 15) * 1000 + 30_000)) / 1000) - 5;
+    expect(largestDeadlineThatFits(30)).toBe(max);
+    expect(largestDeadlineThatFits(30)).toBe(2620);
+    expect(playRunBudgetMs(1, max, 30)).toBeLessThanOrEqual(PLAY_RUN_BUDGET_MS);
+    expect(playRunBudgetMs(1, max + 1, 30)).toBeGreaterThan(PLAY_RUN_BUDGET_MS);
+  });
+
+  it('one session that does not fit is refused with a smaller allowance, never with "1-1" (AK#5)', async () => {
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    const refused = await new RunPlayerTool().execute(
+      { sessions: '1', deadlineSeconds: 2715 },
+      { projectPath: root } as never,
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toContain('nothing was played');
+    expect(refused.content).toContain('one session at 2715 s does not fit one run (limit 2700 s with 30 s boot)');
+    expect(refused.content).toContain('lower deadlineSeconds to at most 2620 s');
+    expect(refused.content).toContain('this request cannot succeed as it is');
+    expect(refused.content).not.toContain('Ask for sessions "1-1"');
+    expect(refused.content).not.toContain('Ask for sessions');
+  });
+
+  it('a request some of which fits is still refused with the batch that does', async () => {
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    // Five rounds of ten minutes: 52 minutes against 45; four fit.
+    const refused = await new RunPlayerTool().execute(
+      { sessions: '1-5', deadlineSeconds: 600 },
+      { projectPath: root } as never,
+    );
+    expect(refused.isError).toBe(true);
+    expect(sessionsThatFit(600, 30)).toBe(4);
+    expect(refused.content).toContain('Ask for sessions "1-4" and accumulate the batches');
+    expect(refused.content).not.toContain('cannot succeed as it is');
+  });
+
+  it('"all" is the catalogue this producer last saw for THIS artifact, not the cap (AK#3)', async () => {
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    const tool = new RunPlayerTool();
+    // Twelve rounds of five minutes do not fit; three do. With no previous
+    // record, "all" is the cap.
+    const cap = await tool.execute({ sessions: 'all', deadlineSeconds: 300 }, { projectPath: root } as never);
+    expect(cap.isError).toBe(true);
+    expect(cap.content).toContain('12 session(s) at 300 s');
+    expect(cap.content).toContain('Ask for sessions "1-8"');
+    // A run leaves the record (catalogue 3) beside the artifact it launched…
+    const first = await tool.execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+    expect(first.isError).toBe(false);
+    const captureDir = join(root, PLAYER_CAPTURE_SUBDIR);
+    expect(previousCatalogue(captureDir, join(root, 'Builds', 'linux', 'Game.x86_64'))).toBe(3);
+    expect(previousCatalogue(captureDir, join(root, 'Builds', 'other', 'Game.x86_64'))).toBeUndefined();
+    // …so "all" at 300 s is three sessions, which fit, and the run happens.
+    const admitted = await tool.execute({ sessions: 'all', deadlineSeconds: 300 }, { projectPath: root } as never);
+    expect(admitted.isError).toBe(false);
+    expect(admitted.content).toContain('PLAY-THROUGH OK');
+    // A record measured on ANOTHER artifact says nothing about this one: cap.
+    const other = fakePlayer(join(root, 'Builds', 'other'), 'Other.x86_64', playerRecord);
+    const foreign = await tool.execute({ sessions: 'all', deadlineSeconds: 300, artifactPath: other }, { projectPath: root } as never);
+    expect(foreign.isError).toBe(true);
+    expect(foreign.content).toContain('12 session(s) at 300 s');
+  });
+
+  it('counts "all" as min(cap, catalogue) only when a catalogue is known', () => {
+    expect(countRequestedSessions('all', 12, 3)).toBe(3);
+    expect(countRequestedSessions('all', 12, 40)).toBe(12);
+    expect(countRequestedSessions('all', 12, undefined)).toBe(12);
+    expect(countRequestedSessions('1-5', 12, 3)).toBe(5);
   });
 });
 
