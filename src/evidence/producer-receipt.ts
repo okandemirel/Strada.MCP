@@ -341,11 +341,9 @@ const RUNTIME_FILE_RE = /\.(?:dll|so|dylib)$|^GameAssembly\.|^UnityCrashHandler.
  * made `Game2.main.obb` part of `Game.apk` (Codex 2026-09-17 round 4 #10).
  */
 function isCompanionObb(entry: string, artifactName: string): boolean {
-  const stem = artifactName.replace(/\.[^.]+$/u, '');
-  return new RegExp('^' + stem.replace(/[.*+?^${}()|[\]\\]/g, '\\const RUNTIME_FILE_RE = /\.(?:dll|so|dylib|obb)$|^GameAssembly\.|^UnityCrashHandler.*\.exe$/i;') + '\\.(?:main|patch)\\.obb
-/** Unity writes `<Name>_Data` beside a player; the filesystem may serve it in any case. */
-function isDataDir(entry: string): boolean {
-  return /_data$/i.test(entry);
+  const stem = artifactName.replace(/\.[^.]+$/u, '').toLowerCase();
+  const lower = entry.toLowerCase();
+  return lower === `${stem}.main.obb` || lower === `${stem}.patch.obb`;
 }
 
 /**
