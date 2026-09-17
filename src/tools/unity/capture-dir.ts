@@ -112,7 +112,10 @@ export const RECORDING_MARKER = '.strada-recording';
  * not it was written by a version that stamped the marker.
  */
 const RECORDER_OUTPUT_RE =
-  /^(?:frame_(?:s\d+_)?\d+\.png|playthrough\.json|playthrough-verdict\.json|player\.log|\.strada-recording|\.DS_Store)$/;
+  // …and the player run's own sidecar (player-run.json, the artifact this
+  // capture belongs to): without it a restored, marker-less recorder
+  // directory failed ownership recognition (Strada.Brain Codex round 6 #24).
+  /^(?:frame_(?:s\d+_)?\d+\.png|playthrough\.json|playthrough-verdict\.json|player-run\.json|player\.log|\.strada-recording|\.DS_Store)$/;
 
 export function isRecorderOutput(name: string): boolean {
   return RECORDER_OUTPUT_RE.test(name);

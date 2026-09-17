@@ -176,3 +176,10 @@ describe('a directory holding only this recorder\'s own output is adopted', () =
     }
   });
 });
+
+describe('recorder output names (Strada.Brain round 6 #24)', () => {
+  it('the player run sidecar is recorder output', () => {
+    expect(isRecorderOutput('player-run.json')).toBe(true);
+    expect(isRecorderOutput('player-run.json.bak')).toBe(false);
+  });
+});
