@@ -21,6 +21,7 @@ import { mkdtempSync, readFileSync, existsSync, rmSync, readdirSync, writeFileSy
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ReceiptSession } from '../../evidence/producer-receipt.js';
+import { EVIDENCE_RUN_ID_SCHEMA, evidenceRunId } from '../../evidence/producer-receipt.js';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { findUnityEditor } from './local-diagnostics.js';
 import { buildPlaymodeArgs, runUnityProcess } from './playmode-verify.js';
@@ -35,6 +36,11 @@ import {
   emitPlaythroughTest, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
 export const PLAYTHROUGH_VERDICT_FILE = 'playthrough-verdict.json';
+
+/** The verdict stamped with the run id it answers, when one was issued. */
+export function withRunId(verdict: PlaythroughVerdict, runId: string | undefined): PlaythroughVerdict {
+  return runId === undefined ? verdict : { ...verdict, runId };
+}
 import { prepareCaptureDir, resolveCaptureDir } from './capture-dir.js';
 
 export const DEFAULT_CAPTURE_SUBDIR = 'Recordings/playthrough';
@@ -227,6 +233,13 @@ export interface PlaythroughVerdict {
   readonly test?: { total: number; passed: number; failed: number; result: string };
   /** Boot time and frame timing of the run, when it reached the play loop. */
   readonly perf?: PlaythroughPerf;
+  /**
+   * The run id the caller issued for THIS invocation, echoed into the file
+   * the reader judges from. Without it the reader's "a verdict from another
+   * attempt is not this attempt's proof" check compared nothing on the
+   * player path (Strada.Brain plan 1.3).
+   */
+  readonly runId?: string;
   /**
    * Error/exception lines from Unity's own log for the run (last 30). The
    * test's record only sees what is logged after it subscribes; a bootstrap
@@ -648,6 +661,7 @@ export class PlaythroughTool implements ITool {
           'maxActions and deadlineSeconds apply per session.',
       },
       maxActions: { type: 'number', description: 'Upper bound on driver actions per session (default 60).' },
+      evidenceRunId: EVIDENCE_RUN_ID_SCHEMA,
       outcomeRequired: {
         type: 'boolean',
         description:
@@ -759,11 +773,14 @@ export class PlaythroughTool implements ITool {
       const exitCode = ran.exitCode;
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
       const outcome = existsSync(resultsPath) ? parseTestRun(readFileSync(resultsPath, 'utf8')) : null;
-      const verdict = withProcessOutcome(
-        judgePlaythrough(captureDir, outcome ?? undefined, log, { outcomeRequired: input['outcomeRequired'] === true }),
-        exitCode,
-        outcome !== null,
-        'editor',
+      const verdict = withRunId(
+        withProcessOutcome(
+          judgePlaythrough(captureDir, outcome ?? undefined, log, { outcomeRequired: input['outcomeRequired'] === true }),
+          exitCode,
+          outcome !== null,
+          'editor',
+        ),
+        evidenceRunId(input),
       );
       try {
         writeFileSync(join(captureDir, PLAYTHROUGH_VERDICT_FILE), JSON.stringify(verdict, null, 2));

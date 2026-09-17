@@ -327,6 +327,17 @@ describe('the evidence receipt', () => {
     expect(createHash('sha256').update(edited).digest('hex')).not.toBe(payload['verdictSha256']);
   });
 
+  it('the verdict FILE names the run it answers — the id the caller issued (Strada.Brain plan 1.3)', async () => {
+    fakePlayer(join(root, 'Builds', 'linux'), 'Game.x86_64', playerRecord);
+    await new RunPlayerTool().execute({ deadlineSeconds: 5, evidenceRunId: 'run-v1' }, { projectPath: root } as never);
+    const onDisk = JSON.parse(readFileSync(join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'), 'utf8')) as { runId?: unknown };
+    expect(onDisk.runId).toBe('run-v1');
+    // No id issued, none invented.
+    await new RunPlayerTool().execute({ deadlineSeconds: 5 }, { projectPath: root } as never);
+    const unissued = JSON.parse(readFileSync(join(root, PLAYER_CAPTURE_SUBDIR, 'playthrough-verdict.json'), 'utf8')) as { runId?: unknown };
+    expect(unissued.runId).toBeUndefined();
+  });
+
   it('an ABSENT observation is not a zero one (Codex 2026-09-13 AI#7)', () => {
     // A game that registers no IActiveSession has nothing to observe the
     // session; the runner says so with a negative index. Carrying that as

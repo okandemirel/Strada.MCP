@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFil
 import { isAbsolute, join, basename, relative } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolMetadata } from '../tool.interface.js';
 import { resolveProjectPath } from './project-path.js';
-import { judgePlaythrough, receiptSessions, renderVerdict, withProcessOutcome, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
+import { judgePlaythrough, receiptSessions, renderVerdict, withProcessOutcome, withRunId, PLAYTHROUGH_VERDICT_FILE } from './playthrough.js';
 import type { PlaythroughVerdict } from './playthrough.js';
 import { PLAYTHROUGH_RECORD_FILE, PLAYTHROUGH_CATALOG_TYPE, MAX_SESSIONS_PER_RUN } from './playthrough-test.js';
 
@@ -355,7 +355,10 @@ export class RunPlayerTool implements ITool {
     // what Strada.Brain reads — stayed green on exit 42, and `isError` said
     // nothing either (Codex 2026-09-12 Y). It goes into the verdict before
     // the file is written, so every reader sees it.
-    const verdict = withProcessOutcome(judged, exitCode, true, 'player');
+    // …AND THE RUN IT ANSWERS: the id the caller issued goes into the file,
+    // so the reader can tell this run's verdict from an older one that a
+    // clock or a copy made look fresh (Strada.Brain plan 1.3).
+    const verdict = withRunId(withProcessOutcome(judged, exitCode, true, 'player'), evidenceRunId(input));
     // THE BYTES THE READER WILL READ. Strada.Brain judges the delivery from
     // this FILE — its frame rate, its frames, its errors — and the receipt
     // said nothing about it, so an admitted receipt authenticated no part of
